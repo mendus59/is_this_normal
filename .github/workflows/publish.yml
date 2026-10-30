@@ -1,0 +1,32 @@
+# Free: exports the database to static files in R2 for the site.
+name: Publish data
+on:
+  schedule:
+    - cron: "47 7 * * *"
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Analyze]
+    types: [completed]
+
+concurrency: pipeline
+
+jobs:
+  publish:
+    if: vars.PIPELINE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+      - run: pip install ./pipeline
+      - run: itn publish

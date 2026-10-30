@@ -1,0 +1,69 @@
+# Paid: spends model tokens. Runs only when dispatched by hand, and only after
+# the required reviewer approves the `paid` environment, which is the only
+# place ANTHROPIC_API_KEY exists.
+name: Analyze
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "Artifact IDs, space separated (e.g. eo/14028 pl/117-169)"
+        required: false
+      type:
+        description: "Or a whole type"
+        type: choice
+        options: ["", scotus_case, public_law, executive_document, action_event]
+      years:
+        description: "Year range, e.g. 2001-2004"
+        required: false
+      unscored:
+        description: "Only artifacts without a current score"
+        type: boolean
+        default: true
+      budget:
+        description: "Hard spending cap in USD"
+        required: true
+        default: "5"
+      max_tier:
+        description: "Most capable model allowed"
+        type: choice
+        options: [haiku, sonnet, opus]
+        default: sonnet
+      dry_run:
+        description: "Estimate cost only, call no model"
+        type: boolean
+        default: true
+
+concurrency: pipeline
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    environment: paid
+    timeout-minutes: 360
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      IDS: ${{ inputs.ids }}
+      TYPE: ${{ inputs.type }}
+      YEARS: ${{ inputs.years }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+      - run: pip install ./pipeline
+      - name: Run analysis
+        run: |
+          args=(--budget "${{ inputs.budget }}" --max-tier "${{ inputs.max_tier }}")
+          [ -n "$IDS" ] && args+=(--ids $IDS)
+          [ -n "$TYPE" ] && args+=(--type "$TYPE")
+          [ -n "$YEARS" ] && args+=(--years "$YEARS")
+          [ "${{ inputs.unscored }}" = "true" ] && args+=(--unscored)
+          [ "${{ inputs.dry_run }}" = "true" ] && args+=(--dry-run)
+          itn analyze "${args[@]}"

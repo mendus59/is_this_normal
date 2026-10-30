@@ -1,0 +1,49 @@
+---
+interface Props { title: string }
+const { title } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@600;700&family=Public+Sans:wght@400;600;700&family=IBM+Plex+Mono&display=swap" />
+  </head>
+  <body>
+    <header class="site">
+      <a class="brand" href={`${base}/`}>IsThisNormal</a>
+      <nav><a href={`${base}/`}>Browse</a><a href={`${base}/methodology/`}>Methodology</a></nav>
+    </header>
+    <main><slot /></main>
+    <footer>No cookies, no analytics. Every page links to its official source.</footer>
+  </body>
+</html>
+<style is:global>
+  :root {
+    --paper: #f5f7f9; --sheet: #fff; --ink: #18202c; --ink-soft: #4a5566; --rule: #d8dee6;
+    --accent: #23507a; --accent-wash: #e6eef6;
+    --ok: #2e7350; --warn: #9a6512; --bad: #a2392f;
+    --font-display: "Spectral", Georgia, serif;
+    --font-body: "Public Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #10151c; --sheet: #161d26; --ink: #e4e9ef; --ink-soft: #a3aebb; --rule: #2a3441;
+      --accent: #8db8e0; --accent-wash: #1a2a3b; --ok: #7cc49c; --warn: #e0b064; --bad: #ec8d83;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--font-body); }
+  header.site, main, footer { max-width: 960px; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-left)); }
+  header.site { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 12px; padding-block: 20px; border-bottom: 1px solid var(--rule); }
+  .brand { font-family: var(--font-display); font-weight: 700; font-size: 22px; color: var(--ink); text-decoration: none; }
+  nav { display: flex; gap: 18px; }
+  a { color: var(--accent); }
+  h1, h2 { font-family: var(--font-display); line-height: 1.2; }
+  footer { padding-block: 40px; color: var(--ink-soft); font-size: 13px; }
+  .mono { font-family: var(--font-mono); font-size: .88em; }
+</style>

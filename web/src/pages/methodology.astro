@@ -1,0 +1,13 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="Methodology · IsThisNormal">
+  <h1>Methodology</h1>
+  <p>Each ruling, law, or executive action is judged only against what existed the day before it took effect: earlier precedent, the statute text in force at the time, earlier comparable actions and how courts treated them, and public data published before it was drafted. Later history is shown separately and never affects the score.</p>
+  <h2>Normalcy score</h2>
+  <p>Analyses score precedent density, precedent survival, authority fidelity, departure magnitude, text and purpose alignment, and (for reactive laws) evidence of need. The combined score is shown as a percentile among everything scored, so 90 means more routine than 90% of scored artifacts.</p>
+  <p>Bands: <b>Routine</b> 80–100, <b>Ordinary</b> 60–79, <b>Unusual</b> 40–59, <b>Novel</b> 20–39, <b>Unprecedented</b> 0–19.</p>
+  <h2>Known limits</h2>
+  <p>The AI models used for analysis were trained on text that includes later events. Inputs are restricted to material dated before each artifact, outputs that cite later material are rejected, and a separate check looks for reasoning that depends on hindsight, but this cannot be fully eliminated.</p>
+  <p>A citation is flagged as incorrect only when two independent checks agree.</p>
+</Base>
