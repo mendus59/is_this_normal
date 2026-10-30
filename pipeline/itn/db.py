@@ -3,7 +3,7 @@
 import psycopg
 from psycopg.types.json import Jsonb
 
-from itn.config import MIGRATIONS_DIR, database_url
+from itn.config import database_url, migrations_dir
 
 
 def connect() -> psycopg.Connection:
@@ -16,8 +16,11 @@ def migrate(conn: psycopg.Connection) -> list[str]:
         "CREATE TABLE IF NOT EXISTS schema_migration (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
     )
     done = {row[0] for row in conn.execute("SELECT name FROM schema_migration")}
+    files = sorted(migrations_dir().glob("*.sql"))
+    if not files:
+        raise RuntimeError(f"No migration files found in {migrations_dir()}")
     applied = []
-    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+    for path in files:
         if path.name in done:
             continue
         with conn.transaction():

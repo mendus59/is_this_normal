@@ -4,8 +4,21 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATIONS_DIR = REPO_ROOT / "schema" / "migrations"
+
+
+def migrations_dir() -> Path:
+    """Locate schema/migrations. The package may be installed into site-packages
+    (as in CI), so look upward from the working directory before the source tree."""
+    if override := os.environ.get("ITN_MIGRATIONS_DIR"):
+        return Path(override)
+    for start in (Path.cwd(), Path(__file__).resolve().parent):
+        for d in (start, *start.parents):
+            candidate = d / "schema" / "migrations"
+            if candidate.is_dir():
+                return candidate
+    raise MissingSetting(
+        "Could not find schema/migrations. Run from the repository or set ITN_MIGRATIONS_DIR."
+    )
 
 # Earliest effective date for scored artifacts.
 SCOPE_START = "2000-01-01"
