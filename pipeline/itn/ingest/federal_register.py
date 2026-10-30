@@ -16,7 +16,7 @@ from itn.config import SCOPE_START
 API = "https://www.federalregister.gov/api/v1/documents.json"
 SOURCE = "federal_register"
 FIELDS = [
-    "document_number", "title", "type", "presidential_document_type", "executive_order_number",
+    "document_number", "title", "type", "subtype", "executive_order_number",
     "signing_date", "publication_date", "html_url", "pdf_url", "raw_text_url", "abstract",
     "citation", "president", "disposition_notes",
 ]
@@ -37,7 +37,10 @@ def fetch_year(client: httpx.Client, year: int) -> Iterator[dict]:
     url: str | None = API
     while url:
         resp = client.get(url, params=params if url == API else None)
-        resp.raise_for_status()
+        if resp.is_error:
+            raise RuntimeError(
+                f"Federal Register API returned {resp.status_code} for {year}: {resp.text[:1000]}"
+            )
         page = resp.json()
         yield from page.get("results", [])
         url = page.get("next_page_url")
@@ -45,7 +48,7 @@ def fetch_year(client: httpx.Client, year: int) -> Iterator[dict]:
 
 def to_artifact(doc: dict) -> dict:
     """Map one Federal Register result to an artifact row."""
-    subtype = _slug(doc.get("presidential_document_type")) or "other"
+    subtype = _slug(doc.get("subtype")) or "other"
     eo_number = doc.get("executive_order_number")
     artifact_id = (
         ids.executive_order(eo_number)
@@ -93,10 +96,15 @@ def run(conn, r2=None, since_year: int | None = None, fetch_text: bool = True) -
                 artifact = to_artifact(doc)
                 raw_url = artifact["metadata"].get("raw_text_url")
                 if fetch_text and r2 and raw_url:
-                    text = client.get(raw_url).raise_for_status().text
-                    key = ids.text_key(artifact["id"])
-                    artifact["text_key"] = key
-                    artifact["text_sha256"] = r2.put_text(key, text)
+                    resp = client.get(raw_url, follow_redirects=True)
+                    if resp.status_code == 404:
+                        # Older documents often have no plain-text rendition; keep the PDF link.
+                        artifact["metadata"]["text_missing"] = True
+                    else:
+                        resp.raise_for_status()
+                        key = ids.text_key(artifact["id"])
+                        artifact["text_key"] = key
+                        artifact["text_sha256"] = r2.put_text(key, resp.text)
                 db.upsert_artifact(conn, artifact)
                 count += 1
             # Re-scan the current year every run so late publications are picked up.

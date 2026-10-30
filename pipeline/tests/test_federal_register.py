@@ -4,7 +4,7 @@ EO = {
     "document_number": "2021-10460",
     "title": "Improving the Nation's Cybersecurity",
     "type": "Presidential Document",
-    "presidential_document_type": "Executive Order",
+    "subtype": "Executive Order",
     "executive_order_number": 14028,
     "signing_date": "2021-05-12",
     "publication_date": "2021-05-17",
@@ -29,7 +29,7 @@ def test_executive_order_keyed_by_number():
 
 
 def test_proclamation_keyed_by_document_number():
-    doc = {**EO, "presidential_document_type": "proclamation", "executive_order_number": None}
+    doc = {**EO, "subtype": "Proclamation", "executive_order_number": None}
     a = to_artifact(doc)
     assert a["id"] == "fr/2021-10460"
     assert a["subtype"] == "proclamation"
