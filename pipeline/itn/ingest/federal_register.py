@@ -29,7 +29,7 @@ def _slug(value: str | None) -> str | None:
 
 RETRY_STATUSES = {429, 500, 502, 503, 504}
 # Pause between plain-text downloads so a full backfill stays under the site's rate limit.
-TEXT_DELAY_SECONDS = 0.5
+TEXT_DELAY_SECONDS = 1.0
 
 
 def get(client: httpx.Client, url: str, params=None, attempts: int = 6) -> httpx.Response:
@@ -114,18 +114,27 @@ def run(conn, r2=None, since_year: int | None = None, fetch_text: bool = True) -
             for doc in fetch_year(client, year):
                 artifact = to_artifact(doc)
                 raw_url = artifact["metadata"].get("raw_text_url")
-                if fetch_text and r2 and raw_url:
+                has_text = conn.execute(
+                    "SELECT text_key IS NOT NULL FROM artifact WHERE id = %s", (artifact["id"],)
+                ).fetchone()
+                if fetch_text and r2 and raw_url and not (has_text and has_text[0]):
                     time.sleep(TEXT_DELAY_SECONDS)
                     resp = get(client, raw_url)
                     if resp.status_code == 404:
                         # Older documents often have no plain-text rendition; keep the PDF link.
                         artifact["metadata"]["text_missing"] = True
+                    elif resp.is_error:
+                        # Still rate limited after retries: keep the metadata and fetch text later.
+                        print(f"{resp.status_code} for {raw_url}; text deferred", flush=True)
+                        artifact["metadata"]["text_pending"] = True
                     else:
-                        resp.raise_for_status()
                         key = ids.text_key(artifact["id"])
                         artifact["text_key"] = key
                         artifact["text_sha256"] = r2.put_text(key, resp.text)
                 db.upsert_artifact(conn, artifact)
+                # Commit per document: rate-limit backoff can outlast the database's
+                # idle-in-transaction timeout.
+                conn.commit()
                 count += 1
             # Re-scan the current year every run so late publications are picked up.
             db.set_cursor(conn, SOURCE, {"next_year": min(year + 1, this_year)})
