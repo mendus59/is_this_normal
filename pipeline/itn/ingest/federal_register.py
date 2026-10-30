@@ -6,6 +6,7 @@ Queries one year at a time because the API stops paginating past 10,000 results.
 
 import datetime as dt
 import re
+import time
 from collections.abc import Iterator
 
 import httpx
@@ -26,6 +27,24 @@ def _slug(value: str | None) -> str | None:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") if value else None
 
 
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+# Pause between plain-text downloads so a full backfill stays under the site's rate limit.
+TEXT_DELAY_SECONDS = 0.5
+
+
+def get(client: httpx.Client, url: str, params=None, attempts: int = 6) -> httpx.Response:
+    """GET with backoff on rate limits and server errors, honoring Retry-After."""
+    for attempt in range(attempts):
+        resp = client.get(url, params=params, follow_redirects=True)
+        if resp.status_code not in RETRY_STATUSES or attempt == attempts - 1:
+            return resp
+        retry_after = resp.headers.get("Retry-After", "")
+        wait = int(retry_after) if retry_after.isdigit() else min(300, 15 * 2**attempt)
+        print(f"{resp.status_code} from {url}; retrying in {wait}s", flush=True)
+        time.sleep(wait)
+    return resp
+
+
 def fetch_year(client: httpx.Client, year: int) -> Iterator[dict]:
     params: list[tuple[str, str | int]] = [
         ("per_page", 1000),
@@ -36,7 +55,7 @@ def fetch_year(client: httpx.Client, year: int) -> Iterator[dict]:
     ] + [("fields[]", f) for f in FIELDS]
     url: str | None = API
     while url:
-        resp = client.get(url, params=params if url == API else None)
+        resp = get(client, url, params=params if url == API else None)
         if resp.is_error:
             raise RuntimeError(
                 f"Federal Register API returned {resp.status_code} for {year}: {resp.text[:1000]}"
@@ -96,7 +115,8 @@ def run(conn, r2=None, since_year: int | None = None, fetch_text: bool = True) -
                 artifact = to_artifact(doc)
                 raw_url = artifact["metadata"].get("raw_text_url")
                 if fetch_text and r2 and raw_url:
-                    resp = client.get(raw_url, follow_redirects=True)
+                    time.sleep(TEXT_DELAY_SECONDS)
+                    resp = get(client, raw_url)
                     if resp.status_code == 404:
                         # Older documents often have no plain-text rendition; keep the PDF link.
                         artifact["metadata"]["text_missing"] = True
@@ -110,4 +130,5 @@ def run(conn, r2=None, since_year: int | None = None, fetch_text: bool = True) -
             # Re-scan the current year every run so late publications are picked up.
             db.set_cursor(conn, SOURCE, {"next_year": min(year + 1, this_year)})
             conn.commit()
+            print(f"{year}: done ({count} documents so far)", flush=True)
     return count
