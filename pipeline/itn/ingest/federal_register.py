@@ -37,7 +37,10 @@ def fetch_year(client: httpx.Client, year: int) -> Iterator[dict]:
     url: str | None = API
     while url:
         resp = client.get(url, params=params if url == API else None)
-        resp.raise_for_status()
+        if resp.is_error:
+            raise RuntimeError(
+                f"Federal Register API returned {resp.status_code} for {year}: {resp.text[:1000]}"
+            )
         page = resp.json()
         yield from page.get("results", [])
         url = page.get("next_page_url")
