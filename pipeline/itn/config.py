@@ -37,12 +37,14 @@ class R2Settings:
 
     @classmethod
     def from_env(cls) -> "R2Settings":
-        return cls(
-            account_id=require("R2_ACCOUNT_ID"),
-            access_key_id=require("R2_ACCESS_KEY_ID"),
-            secret_access_key=require("R2_SECRET_ACCESS_KEY"),
-            bucket=require("R2_BUCKET"),
-        )
+        names = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"]
+        missing = [n for n in names if not os.environ.get(n)]
+        if missing:
+            raise MissingSetting(
+                f"Not set: {', '.join(missing)}. These must be repository secrets "
+                "(not variables or environment secrets). See SETUP.md."
+            )
+        return cls(*(os.environ[n] for n in names))
 
 
 def database_url() -> str:
