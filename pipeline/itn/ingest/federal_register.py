@@ -96,10 +96,15 @@ def run(conn, r2=None, since_year: int | None = None, fetch_text: bool = True) -
                 artifact = to_artifact(doc)
                 raw_url = artifact["metadata"].get("raw_text_url")
                 if fetch_text and r2 and raw_url:
-                    text = client.get(raw_url).raise_for_status().text
-                    key = ids.text_key(artifact["id"])
-                    artifact["text_key"] = key
-                    artifact["text_sha256"] = r2.put_text(key, text)
+                    resp = client.get(raw_url, follow_redirects=True)
+                    if resp.status_code == 404:
+                        # Older documents often have no plain-text rendition; keep the PDF link.
+                        artifact["metadata"]["text_missing"] = True
+                    else:
+                        resp.raise_for_status()
+                        key = ids.text_key(artifact["id"])
+                        artifact["text_key"] = key
+                        artifact["text_sha256"] = r2.put_text(key, resp.text)
                 db.upsert_artifact(conn, artifact)
                 count += 1
             # Re-scan the current year every run so late publications are picked up.
