@@ -16,7 +16,7 @@ from itn.config import SCOPE_START
 API = "https://www.federalregister.gov/api/v1/documents.json"
 SOURCE = "federal_register"
 FIELDS = [
-    "document_number", "title", "type", "presidential_document_type", "executive_order_number",
+    "document_number", "title", "type", "subtype", "executive_order_number",
     "signing_date", "publication_date", "html_url", "pdf_url", "raw_text_url", "abstract",
     "citation", "president", "disposition_notes",
 ]
@@ -48,7 +48,7 @@ def fetch_year(client: httpx.Client, year: int) -> Iterator[dict]:
 
 def to_artifact(doc: dict) -> dict:
     """Map one Federal Register result to an artifact row."""
-    subtype = _slug(doc.get("presidential_document_type")) or "other"
+    subtype = _slug(doc.get("subtype")) or "other"
     eo_number = doc.get("executive_order_number")
     artifact_id = (
         ids.executive_order(eo_number)
