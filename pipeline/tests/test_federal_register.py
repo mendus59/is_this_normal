@@ -38,3 +38,23 @@ def test_proclamation_keyed_by_document_number():
 def test_pre_2000_is_reference_only():
     a = to_artifact({**EO, "signing_date": "1998-06-01"})
     assert a["in_scope"] is False
+
+
+def test_get_retries_after_rate_limit(monkeypatch):
+    import httpx
+
+    from itn.ingest import federal_register as fr
+
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"Retry-After": "0"})
+        return httpx.Response(200, text="ok")
+
+    monkeypatch.setattr(fr.time, "sleep", lambda s: None)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        resp = fr.get(client, "https://example.test/doc.txt")
+    assert resp.status_code == 200
+    assert len(calls) == 2
