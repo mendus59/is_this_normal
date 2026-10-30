@@ -1,0 +1,36 @@
+# Free: pulls public records daily. Has no access to the model API key.
+name: Ingest
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "First year to (re)ingest; blank resumes from the saved cursor"
+        required: false
+
+concurrency: pipeline
+
+jobs:
+  ingest:
+    if: vars.PIPELINE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      DATA_GOV_API_KEY: ${{ secrets.DATA_GOV_API_KEY }}
+      COURTLISTENER_TOKEN: ${{ secrets.COURTLISTENER_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+      - run: pip install ./pipeline
+      - run: itn migrate
+      - run: itn ingest ${{ inputs.since && format('--since {0}', inputs.since) || '' }}

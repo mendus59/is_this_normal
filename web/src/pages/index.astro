@@ -1,0 +1,82 @@
+---
+import Base from "../layouts/Base.astro";
+const dataBase = import.meta.env.PUBLIC_DATA_BASE_URL ?? "";
+---
+<Base title="IsThisNormal">
+  <h1>Is this normal?</h1>
+  <p class="lede">Supreme Court rulings, executive actions, and contentious laws since 2000, measured against the precedent that existed when they happened.</p>
+  <div class="filters">
+    <label>Type
+      <select id="f-type">
+        <option value="">All</option>
+        <option value="scotus_case">Supreme Court</option>
+        <option value="public_law">Laws</option>
+        <option value="executive_document">Executive documents</option>
+        <option value="action_event">Executive actions</option>
+      </select>
+    </label>
+    <label>Search titles <input id="f-q" type="search" placeholder="e.g. cybersecurity" /></label>
+  </div>
+  <p id="status" class="status">Loading catalog…</p>
+  <ol id="list" class="list"></ol>
+</Base>
+
+<script define:vars={{ dataBase }}>
+  const status = document.getElementById("status");
+  const list = document.getElementById("list");
+  const fType = document.getElementById("f-type");
+  const fQ = document.getElementById("f-q");
+  const TYPE_LABEL = { scotus_case: "Supreme Court", public_law: "Law", executive_document: "Executive", action_event: "Executive action" };
+  let catalog = [];
+
+  function render() {
+    const q = fQ.value.trim().toLowerCase();
+    const rows = catalog.filter((a) => (!fType.value || a.type === fType.value) && (!q || a.title.toLowerCase().includes(q)));
+    status.textContent = `${rows.length.toLocaleString()} of ${catalog.length.toLocaleString()} artifacts`;
+    list.replaceChildren(...rows.slice(0, 500).map((a) => {
+      const li = document.createElement("li");
+      const src = a.sources?.[0];
+      li.innerHTML = `
+        <div class="row-meta"><span class="mono">${a.id}</span><span>${TYPE_LABEL[a.type] ?? a.type}${a.subtype ? " · " + a.subtype.replaceAll("_", " ") : ""}</span><span>${a.date ?? ""}</span></div>
+        <div class="row-title"></div>
+        ${a.band ? `<span class="band band-${a.band}">${a.band} · ${a.percentile}</span>` : `<span class="band">not yet analyzed</span>`}`;
+      li.querySelector(".row-title").textContent = a.title;
+      if (src) {
+        const link = document.createElement("a");
+        link.href = src.url; link.textContent = src.label; link.rel = "noopener";
+        li.append(" ", link);
+      }
+      return li;
+    }));
+  }
+
+  async function load() {
+    if (!dataBase) { status.textContent = "No data source configured yet. Set PUBLIC_DATA_BASE_URL (see SETUP.md)."; return; }
+    try {
+      const manifest = await (await fetch(`${dataBase}/manifest.json`, { cache: "no-cache" })).json();
+      catalog = await (await fetch(`${dataBase}/${manifest.prefix}/catalog.json`)).json();
+      render();
+    } catch (err) {
+      status.textContent = `Could not load the catalog from ${dataBase}. Check the bucket's public access and CORS settings.`;
+    }
+  }
+  fType.addEventListener("change", render);
+  fQ.addEventListener("input", render);
+  load();
+</script>
+
+<style>
+  .lede { color: var(--ink-soft); font-size: 18px; max-width: 62ch; }
+  .filters { display: flex; flex-wrap: wrap; gap: 16px; margin: 24px 0 8px; }
+  .filters label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-soft); }
+  select, input { font: inherit; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--ink); }
+  .status { color: var(--ink-soft); font-size: 14px; }
+  .list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .list :global(li) { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; }
+  .list :global(.row-meta) { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--ink-soft); }
+  .list :global(.row-title) { font-weight: 600; margin: 4px 0 6px; }
+  .list :global(.band) { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--accent-wash); color: var(--ink-soft); }
+  .list :global(.band-routine), .list :global(.band-ordinary) { color: var(--ok); }
+  .list :global(.band-novel) { color: var(--warn); }
+  .list :global(.band-unprecedented) { color: var(--bad); }
+</style>
