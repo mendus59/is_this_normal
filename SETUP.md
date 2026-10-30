@@ -14,23 +14,12 @@ Do these in order. Each step says exactly what to copy into GitHub.
 
 ## 2. Cloudflare R2 (documents and published data)
 
-1. Sign up at <https://dash.cloudflare.com/sign-up>. In the sidebar open **R2 Object Storage** and
-   enable it. Cloudflare asks for a payment method even for the free tier
-   (10 GB storage, no download fees).
-2. **Create bucket** named `isthisnormal-data` (location: Automatic).
-3. Public read access, pick one:
-   - **Custom domain (recommended):** bucket **Settings → Public access → Custom Domains → Connect Domain**,
-     e.g. `data.yourdomain.org`. The domain's DNS must be on Cloudflare.
-   - **For testing:** **R2.dev subdomain → Allow Access**. This URL is rate-limited and not meant for production.
-4. Bucket **Settings → CORS policy → Add CORS policy**, paste:
-   ```json
-   [{"AllowedOrigins": ["https://mendus59.github.io", "http://localhost:4321"],
-     "AllowedMethods": ["GET", "HEAD"], "AllowedHeaders": ["*"], "MaxAgeSeconds": 3600}]
-   ```
-   Add your custom site domain to `AllowedOrigins` later if you get one.
-5. **R2 Object Storage → Manage API tokens → Create API token**: permission **Object Read & Write**,
-   applied to `isthisnormal-data` only. Copy the **Access Key ID** and **Secret Access Key**
-   (shown once) and your **Account ID** (on the R2 overview page).
+Full step-by-step instructions, including moving DNS from Squarespace to
+Cloudflare so the bucket can use `data.yourdomain.com`, are in
+[docs/r2-setup.md](docs/r2-setup.md). In short: move the domain's nameservers to
+Cloudflare (registration stays at Squarespace), create the `isthisnormal-data`
+bucket, connect the custom domain, add the CORS policy, and create an Object
+Read & Write API token scoped to that bucket.
 
 ## 3. Neon Postgres (citation graph and analyses)
 
