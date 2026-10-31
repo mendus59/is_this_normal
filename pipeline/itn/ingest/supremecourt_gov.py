@@ -189,11 +189,11 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
             rows = parse_term_table(resp.text, str(resp.url))
             print(f"Term {term}: {len(rows)} opinions listed", flush=True)
             if not rows:
-                m = re.search(r"\d\dpdf/", resp.text)
-                i = m.start() if m else resp.text.find("pdf")
+                spots = [m.start() for m in re.finditer(r"\.pdf", resp.text, re.I)]
+                i = spots[len(spots) // 2] if spots else 0
                 print(f"Term {term}: no rows parsed from {len(resp.text)} chars "
-                      f"({resp.headers.get('content-type')}); {resp.text.count('.pdf')} PDF links; "
-                      f"near first: {resp.text[max(0, i - 400):i + 200]!r}", flush=True)
+                      f"({resp.headers.get('content-type')}); {len(spots)} PDF links; "
+                      f"sample: {resp.text[max(0, i - 900):i + 100]!r}", flush=True)
                 break
             for row in rows:
                 if time.monotonic() > deadline:
