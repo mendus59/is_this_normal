@@ -26,7 +26,8 @@ def cmd_ingest(args) -> None:
         "congress-laws": lambda conn: congress_laws.run(
             conn, r2=r2, since_congress=args.since_congress, fetch_text=not args.no_text,
             max_minutes=args.max_minutes),
-        "scotus-bulk": lambda conn: cap_scotus.run(conn, r2=r2, fetch_text=not args.no_text),
+        "scotus-bulk": lambda conn: cap_scotus.run(
+            conn, r2=r2, fetch_text=not args.no_text, max_minutes=args.max_minutes),
         "scotus-gov": lambda conn: supremecourt_gov.run(
             conn, r2=r2, fetch_text=not args.no_text, max_minutes=args.max_minutes),
         "scotus": lambda conn: courtlistener_scotus.run(

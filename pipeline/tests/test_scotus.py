@@ -91,7 +91,7 @@ def test_cap_case_mapping():
     case = {"id": 1, "name_abbreviation": "Bush v. Gore", "decision_date": "2000-12-12",
             "docket_number": "00-949", "citations": [{"type": "official", "cite": "531 U.S. 98"}],
             "casebody": {"opinions": [
-                {"type": "per-curiam", "author": None, "text": "Per Curiam. ..."},
+                {"type": "per-curiam", "author": None, "text": "Per Curiam. " + "x" * 3000},
                 {"type": "dissent", "author": "Justice Stevens, with whom Justice Ginsburg and "
                                               "Justice Breyer join, dissenting.", "text": "I dissent."}]}}
     buf = io.BytesIO()
@@ -113,3 +113,13 @@ def test_cap_author_cleanup():
     assert clean_author("Chief Justice Rehnquist delivered the opinion of the Court.") == "Rehnquist"
     assert clean_author("Justice O'Connor, concurring.") == "O'Connor"
     assert clean_author(None) is None
+
+
+def test_cap_orders_are_not_decisions():
+    from itn.ingest.cap_scotus import is_decision
+
+    order = {"casebody": {"opinions": [{"type": "majority", "text": "Certiorari denied."}]}}
+    assert not is_decision(order)
+    assert is_decision({"casebody": {"opinions": [{"type": "majority", "text": "x" * 5000}]}})
+    denial_dissent = {"casebody": {"opinions": [{"type": "dissent", "text": "x" * 9000}]}}
+    assert not is_decision(denial_dissent)
