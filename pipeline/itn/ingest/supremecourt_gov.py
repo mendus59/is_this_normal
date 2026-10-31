@@ -189,12 +189,10 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
             rows = parse_term_table(resp.text, str(resp.url))
             print(f"Term {term}: {len(rows)} opinions listed", flush=True)
             if not rows:
-                spots = [m.start() for m in re.finditer(r"\.pdf", resp.text, re.I)]
-                i = spots[len(spots) // 2] if spots else 0
-                print(f"Term {term}: no rows parsed from {len(resp.text)} chars "
-                      f"({resp.headers.get('content-type')}); {len(spots)} PDF links; "
-                      f"sample: {resp.text[max(0, i - 900):i + 100]!r}", flush=True)
-                break
+                # The Court keeps slip opinion lists only for recent terms; older ones
+                # redirect to the bound volumes page. CourtListener covers those terms.
+                print(f"Term {term}: no slip opinion list (got {resp.url})", flush=True)
+                continue
             for row in rows:
                 if time.monotonic() > deadline:
                     print(f"Time budget reached in term {term}; resuming next run", flush=True)
