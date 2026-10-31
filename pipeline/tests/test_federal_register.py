@@ -78,3 +78,15 @@ def test_get_retries_after_dropped_connection(monkeypatch):
         resp = http.get(client, "https://example.test/doc.txt")
     assert resp.status_code == 200
     assert len(calls) == 2
+
+
+def test_get_returns_429_when_wait_exceeds_max_wait(monkeypatch):
+    import httpx
+
+    from itn import http
+
+    monkeypatch.setattr(http.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("slept")))
+    with httpx.Client(transport=httpx.MockTransport(
+            lambda r: httpx.Response(429, headers={"Retry-After": "2192"}))) as client:
+        resp = http.get(client, "https://example.test/x", max_wait=180)
+    assert resp.status_code == 429

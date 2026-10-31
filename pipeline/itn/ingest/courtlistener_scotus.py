@@ -7,6 +7,7 @@ committed as soon as it is complete. A run that stops part way resumes from the
 filing date it reached, and cases already loaded are skipped.
 """
 
+import logging
 import re
 import time
 
@@ -22,6 +23,15 @@ SITE = "https://www.courtlistener.com"
 SOURCE = "courtlistener_scotus"
 # Stay under 5,000 requests per hour.
 API_DELAY_SECONDS = 0.8
+# Waits longer than this mean the hourly quota is spent; stop and resume next run.
+MAX_RATE_WAIT_SECONDS = 180
+
+# eyecite logs a warning for every ambiguous short citation; they are harmless here.
+logging.getLogger("eyecite").setLevel(logging.ERROR)
+
+
+class RateLimited(Exception):
+    pass
 OPINION_FIELDS = ["id", "type", "author_str", "joined_by_str", "per_curiam", "ordering_key",
                   "plain_text", "html_with_citations", "html_lawbox", "html_columbia",
                   "xml_harvard", "html"]
@@ -149,7 +159,9 @@ class CourtListener:
     def get(self, url: str, params=None) -> dict:
         time.sleep(API_DELAY_SECONDS)
         url = url if url.startswith("http") else f"{API}{url}"
-        resp = get(self.client, url, params=params)
+        resp = get(self.client, url, params=params, max_wait=MAX_RATE_WAIT_SECONDS)
+        if resp.status_code == 429:
+            raise RateLimited(f"Retry-After {resp.headers.get('Retry-After', '?')}s")
         if resp.is_error:
             raise RuntimeError(f"CourtListener returned {resp.status_code} for {url}: {resp.text[:500]}")
         return resp.json()
@@ -175,48 +187,53 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
         cl = CourtListener(client, token)
         params = {"type": "o", "court": "scotus", "filed_after": start,
                   "order_by": "dateFiled asc"}
-        for hit in cl.paged("/search/", params):
-            cluster = cluster_from_hit(hit)
-            if cluster["status"] not in (None, "Published"):
-                continue
-            if time.monotonic() > deadline:
-                print(f"Time budget reached at {cluster.get('date_filed')}; resuming next run", flush=True)
-                break
-            done = conn.execute(
-                "SELECT 1 FROM artifact WHERE metadata->>'courtlistener_cluster' = %s"
-                " AND metadata ? 'opinions'", (str(cluster["id"]),)).fetchone()
-            if not done:
-                try:
-                    docket_number = cluster["docket_number"]
-                    aid = artifact_id(cluster, docket_number)
-                    opinions = list(cl.paged("/opinions/", {"cluster": cluster["id"],
-                                                            "fields": ",".join(OPINION_FIELDS)}))
-                except (RuntimeError, httpx.HTTPError) as err:
-                    # One bad record shouldn't stop the backfill; it is retried next run.
-                    print(f"Skipping cluster {cluster['id']} for now: {str(err)[:200]}", flush=True)
-                    skipped += 1
+        try:
+            for hit in cl.paged("/search/", params):
+                cluster = cluster_from_hit(hit)
+                if cluster["status"] not in (None, "Published"):
                     continue
-                if not aid:
-                    print(f"Skipping cluster {cluster['id']}: no U.S. cite or docket number", flush=True)
-                    continue
-                artifact = to_artifact(cluster, aid, docket_number)
-                comps = to_components(aid, opinions)
-                artifact["metadata"]["opinions"] = len(comps)
-                db.upsert_artifact(conn, artifact)
-                for comp, text in comps:
-                    if text and fetch_text and r2:
-                        comp["text_key"] = ids.component_text_key(comp["id"])
-                        r2.put_text(comp["text_key"], text)
-                    db.upsert_component(conn, comp)
-                    db.replace_citations(conn, comp["id"], citations.EXTRACTOR,
-                                         citations.extract(text, artifact["effective_date"]))
+                if time.monotonic() > deadline:
+                    print(f"Time budget reached at {cluster.get('date_filed')}; resuming next run", flush=True)
+                    break
+                done = conn.execute(
+                    "SELECT 1 FROM artifact WHERE metadata->>'courtlistener_cluster' = %s"
+                    " AND metadata ? 'opinions'", (str(cluster["id"]),)).fetchone()
+                # Don't hold a transaction open across network waits.
                 conn.commit()
-                count += 1
-            # Only move the cursor while nothing has been skipped, so skips are retried.
-            if not skipped and cluster.get("date_filed"):
-                db.set_cursor(conn, SOURCE, {"next_date": cluster["date_filed"]})
-                conn.commit()
-            if count and count % 100 == 0 and not done:
-                print(f"{cluster.get('date_filed')}: {count} cases so far, {skipped} skipped", flush=True)
+                if not done:
+                    try:
+                        docket_number = cluster["docket_number"]
+                        aid = artifact_id(cluster, docket_number)
+                        opinions = list(cl.paged("/opinions/", {"cluster": cluster["id"],
+                                                                "fields": ",".join(OPINION_FIELDS)}))
+                    except (RuntimeError, httpx.HTTPError) as err:
+                        # One bad record shouldn't stop the backfill; it is retried next run.
+                        print(f"Skipping cluster {cluster['id']} for now: {str(err)[:200]}", flush=True)
+                        skipped += 1
+                        continue
+                    if not aid:
+                        print(f"Skipping cluster {cluster['id']}: no U.S. cite or docket number", flush=True)
+                        continue
+                    artifact = to_artifact(cluster, aid, docket_number)
+                    comps = to_components(aid, opinions)
+                    artifact["metadata"]["opinions"] = len(comps)
+                    db.upsert_artifact(conn, artifact)
+                    for comp, text in comps:
+                        if text and fetch_text and r2:
+                            comp["text_key"] = ids.component_text_key(comp["id"])
+                            r2.put_text(comp["text_key"], text)
+                        db.upsert_component(conn, comp)
+                        db.replace_citations(conn, comp["id"], citations.EXTRACTOR,
+                                             citations.extract(text, artifact["effective_date"]))
+                    conn.commit()
+                    count += 1
+                # Only move the cursor while nothing has been skipped, so skips are retried.
+                if not skipped and cluster.get("date_filed"):
+                    db.set_cursor(conn, SOURCE, {"next_date": cluster["date_filed"]})
+                    conn.commit()
+                if count and count % 100 == 0 and not done:
+                    print(f"{cluster.get('date_filed')}: {count} cases so far, {skipped} skipped", flush=True)
+        except RateLimited as err:
+            print(f"CourtListener rate limit reached ({err}); resuming next run", flush=True)
     print(f"Done: {count} cases, {skipped} skipped", flush=True)
     return count
