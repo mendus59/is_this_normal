@@ -22,7 +22,8 @@ jobs:
           curl -sS -D - -o manifest.json -H "Origin: $ORIGIN" "$BASE/manifest.json"
           echo; head -c 500 manifest.json; echo
       - name: CORS preflight
-        run: curl -sS -D - -o /dev/null -X OPTIONS -H "Origin: $ORIGIN" -H "Access-Control-Request-Method: GET" "$BASE/manifest.json"
+        run: |
+          curl -sS -D - -o /dev/null -X OPTIONS -H "Origin: $ORIGIN" -H "Access-Control-Request-Method: GET" "$BASE/manifest.json"
       - name: Catalog
         run: |
           prefix=$(python3 -c "import json; print(json.load(open('manifest.json'))['prefix'])")
