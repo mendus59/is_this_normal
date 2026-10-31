@@ -1,7 +1,7 @@
 from itn import ids
 from itn.extract.citations import extract
 from itn.ingest.courtlistener_scotus import (
-    artifact_id, opinion_text, split_names, to_artifact, to_components,
+    artifact_id, cluster_from_hit, opinion_text, split_names, to_artifact, to_components,
 )
 
 CLUSTER = {
@@ -69,3 +69,13 @@ def test_extract_citations():
     assert rows[0]["pinpoint"] == "153"
     assert rows[0]["citing_date"] == "2022-06-24"
     assert "Roe v. Wade" in rows[0]["context_snippet"]
+
+
+def test_cluster_from_search_hit():
+    hit = {"cluster_id": 6375233, "caseName": "Dobbs v. Jackson Women's Health Organization",
+           "dateFiled": "2022-06-24T00:00:00-07:00", "citation": ["597 U.S. 215", "142 S. Ct. 2228"],
+           "docketNumber": "19-1392", "absolute_url": "/opinion/6375233/dobbs/", "status": "Published"}
+    c = cluster_from_hit(hit)
+    assert c["date_filed"] == "2022-06-24"
+    assert artifact_id(c, c["docket_number"]) == "scotus/597-us-215"
+    assert c["citations"][1] == {"volume": "142", "reporter": "S. Ct.", "page": "2228"}

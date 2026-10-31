@@ -10,7 +10,7 @@ USER_AGENT = "IsThisNormal pipeline (+https://hownormalisthis.com)"
 
 
 def client(**kwargs) -> httpx.Client:
-    return httpx.Client(timeout=60, headers={"User-Agent": USER_AGENT}, **kwargs)
+    return httpx.Client(timeout=120, headers={"User-Agent": USER_AGENT}, **kwargs)
 
 
 def get(client: httpx.Client, url: str, params=None, attempts: int = 6) -> httpx.Response:

@@ -22,9 +22,6 @@ SITE = "https://www.courtlistener.com"
 SOURCE = "courtlistener_scotus"
 # Stay under 5,000 requests per hour.
 API_DELAY_SECONDS = 0.8
-CLUSTER_FIELDS = ["id", "absolute_url", "case_name", "case_name_full", "date_filed", "citations",
-                  "syllabus", "summary", "judges", "docket", "precedential_status",
-                  "scdb_id", "scdb_votes_majority", "scdb_votes_minority"]
 OPINION_FIELDS = ["id", "type", "author_str", "joined_by_str", "per_curiam", "ordering_key",
                   "plain_text", "html_with_citations", "html_lawbox", "html_columbia",
                   "xml_harvard", "html"]
@@ -66,6 +63,32 @@ def us_cite(cluster: dict) -> tuple[str, str] | None:
     return None
 
 
+_CITE = re.compile(r"^\s*(\d+)\s+(.+?)\s+(\d+)\s*$")
+
+
+def cluster_from_hit(hit: dict) -> dict:
+    """Case listing rows come from the search API, which is indexed and fast; filtering
+    the clusters endpoint by court times out. Reshape a hit like a cluster."""
+    cites = []
+    for c in hit.get("citation") or []:
+        m = _CITE.match(c)
+        if m:
+            cites.append({"volume": m.group(1), "reporter": m.group(2), "page": m.group(3)})
+    return {
+        "id": hit["cluster_id"],
+        "absolute_url": hit.get("absolute_url") or f"/opinion/{hit['cluster_id']}/",
+        "case_name": hit.get("caseName"),
+        "case_name_full": hit.get("caseNameFull"),
+        "date_filed": (hit.get("dateFiled") or "")[:10] or None,
+        "citations": cites,
+        "syllabus": hit.get("syllabus"),
+        "judges": hit.get("judge"),
+        "docket_number": hit.get("docketNumber"),
+        "status": hit.get("status"),
+        "scdb_id": hit.get("scdb_id"),
+    }
+
+
 def artifact_id(cluster: dict, docket_number: str | None) -> str | None:
     cite = us_cite(cluster)
     if cite:
@@ -99,8 +122,6 @@ def to_artifact(cluster: dict, aid: str, docket_number: str | None) -> dict:
             "docket_number": docket_number,
             "judges": cluster.get("judges"),
             "scdb_id": cluster.get("scdb_id"),
-            "votes_majority": cluster.get("scdb_votes_majority"),
-            "votes_minority": cluster.get("scdb_votes_minority"),
         },
     }
 
@@ -152,10 +173,12 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
     count = skipped = 0
     with http.client() as client:
         cl = CourtListener(client, token)
-        params = {"docket__court": "scotus", "date_filed__gte": start,
-                  "precedential_status": "Published", "order_by": "date_filed,id",
-                  "fields": ",".join(CLUSTER_FIELDS)}
-        for cluster in cl.paged("/clusters/", params):
+        params = {"type": "o", "court": "scotus", "filed_after": start,
+                  "order_by": "dateFiled asc"}
+        for hit in cl.paged("/search/", params):
+            cluster = cluster_from_hit(hit)
+            if cluster["status"] not in (None, "Published"):
+                continue
             if time.monotonic() > deadline:
                 print(f"Time budget reached at {cluster.get('date_filed')}; resuming next run", flush=True)
                 break
@@ -164,9 +187,7 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
                 " AND metadata ? 'opinions'", (str(cluster["id"]),)).fetchone()
             if not done:
                 try:
-                    docket_number = None
-                    if not us_cite(cluster):
-                        docket_number = cl.get(cluster["docket"], {"fields": "docket_number"}).get("docket_number")
+                    docket_number = cluster["docket_number"]
                     aid = artifact_id(cluster, docket_number)
                     opinions = list(cl.paged("/opinions/", {"cluster": cluster["id"],
                                                             "fields": ",".join(OPINION_FIELDS)}))
