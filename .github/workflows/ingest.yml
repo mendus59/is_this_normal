@@ -8,6 +8,9 @@ on:
       since:
         description: "First year to (re)ingest; blank resumes from the saved cursor"
         required: false
+      since_congress:
+        description: "First Congress to (re)ingest laws from; blank resumes from the saved cursor"
+        required: false
 
 concurrency: pipeline
 
@@ -15,7 +18,7 @@ jobs:
   ingest:
     if: vars.PIPELINE_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -33,4 +36,7 @@ jobs:
           cache-dependency-path: pipeline/pyproject.toml
       - run: pip install ./pipeline
       - run: itn migrate
-      - run: itn ingest ${{ inputs.since && format('--since {0}', inputs.since) || '' }}
+      - run: >-
+          itn ingest
+          ${{ inputs.since && format('--since {0}', inputs.since) || '' }}
+          ${{ inputs.since_congress && format('--since-congress {0}', inputs.since_congress) || '' }}

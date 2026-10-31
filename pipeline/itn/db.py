@@ -34,16 +34,18 @@ def migrate(conn: psycopg.Connection) -> list[str]:
 def upsert_artifact(conn: psycopg.Connection, a: dict) -> None:
     conn.execute(
         """
-        INSERT INTO artifact (id, type, subtype, title, effective_date, in_scope, closure_depth,
-                              sources, official_summary, text_key, text_sha256, metadata)
+        INSERT INTO artifact (id, type, subtype, title, effective_date, in_scope, contentious,
+                              closure_depth, sources, official_summary, text_key, text_sha256,
+                              metadata)
         VALUES (%(id)s, %(type)s, %(subtype)s, %(title)s, %(effective_date)s, %(in_scope)s,
-                %(closure_depth)s, %(sources)s, %(official_summary)s, %(text_key)s,
-                %(text_sha256)s, %(metadata)s)
+                %(contentious)s, %(closure_depth)s, %(sources)s, %(official_summary)s,
+                %(text_key)s, %(text_sha256)s, %(metadata)s)
         ON CONFLICT (id) DO UPDATE SET
             subtype = EXCLUDED.subtype,
             title = EXCLUDED.title,
             effective_date = EXCLUDED.effective_date,
             in_scope = EXCLUDED.in_scope,
+            contentious = COALESCE(EXCLUDED.contentious, artifact.contentious),
             closure_depth = LEAST(artifact.closure_depth, EXCLUDED.closure_depth),
             sources = EXCLUDED.sources,
             official_summary = COALESCE(EXCLUDED.official_summary, artifact.official_summary),
@@ -52,7 +54,7 @@ def upsert_artifact(conn: psycopg.Connection, a: dict) -> None:
             metadata = artifact.metadata || EXCLUDED.metadata,
             updated_at = now()
         """,
-        {**a, "sources": Jsonb(a["sources"]), "metadata": Jsonb(a["metadata"])},
+        {"contentious": None, **a, "sources": Jsonb(a["sources"]), "metadata": Jsonb(a["metadata"])},
     )
 
 
