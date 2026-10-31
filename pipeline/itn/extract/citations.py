@@ -17,7 +17,8 @@ _SECTION = re.compile(r"^[0-9A-Za-z.\-]+$")
 
 
 def _target(cite) -> str | None:
-    g = cite.groups
+    # eyecite leaves a group as None for slip cites like "597 U. S. ___".
+    g = {k: (v or "") for k, v in cite.groups.items()}
     if isinstance(cite, FullCaseCitation):
         if cite.corrected_reporter() == "U.S." and g.get("volume", "").isdigit() \
                 and g.get("page", "").isdigit():

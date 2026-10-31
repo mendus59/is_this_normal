@@ -123,3 +123,8 @@ def test_cap_orders_are_not_decisions():
     assert is_decision({"casebody": {"opinions": [{"type": "majority", "text": "x" * 5000}]}})
     denial_dissent = {"casebody": {"opinions": [{"type": "dissent", "text": "x" * 9000}]}}
     assert not is_decision(denial_dissent)
+
+
+def test_extract_ignores_blank_slip_cites():
+    rows = extract("Dobbs v. Jackson Women's Health Org., 597 U. S. ___ (2022); 410 U.S. 113.")
+    assert [r["to_artifact"] for r in rows] == ["scotus/410-us-113"]
