@@ -71,3 +71,34 @@ def set_cursor(conn: psycopg.Connection, source: str, cursor: dict) -> None:
         """,
         (source, Jsonb(cursor)),
     )
+
+
+def upsert_component(conn: psycopg.Connection, c: dict) -> None:
+    conn.execute(
+        """
+        INSERT INTO component (id, artifact_id, kind, author, joined_by, ord, text_key)
+        VALUES (%(id)s, %(artifact_id)s, %(kind)s, %(author)s, %(joined_by)s, %(ord)s, %(text_key)s)
+        ON CONFLICT (id) DO UPDATE SET
+            kind = EXCLUDED.kind, author = EXCLUDED.author, joined_by = EXCLUDED.joined_by,
+            ord = EXCLUDED.ord, text_key = COALESCE(EXCLUDED.text_key, component.text_key)
+        """,
+        c,
+    )
+
+
+def replace_citations(conn: psycopg.Connection, component_id: str, extractor: str,
+                      citations: list[dict]) -> None:
+    """Swap one extractor's citations for a component, so re-runs don't pile up."""
+    conn.execute("DELETE FROM citation WHERE from_component = %s AND extractor = %s",
+                 (component_id, extractor))
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO citation (from_component, to_artifact, pinpoint, raw_text,
+                                  context_snippet, citing_date, extractor)
+            VALUES (%(from_component)s, %(to_artifact)s, %(pinpoint)s, %(raw_text)s,
+                    %(context_snippet)s, %(citing_date)s, %(extractor)s)
+            ON CONFLICT DO NOTHING
+            """,
+            [{**c, "from_component": component_id, "extractor": extractor} for c in citations],
+        )

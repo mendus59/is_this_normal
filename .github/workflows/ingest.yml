@@ -11,6 +11,9 @@ on:
       since_congress:
         description: "First Congress to (re)ingest laws from; blank resumes from the saved cursor"
         required: false
+      since_date:
+        description: "First Supreme Court filing date to (re)ingest, YYYY-MM-DD; blank resumes from the saved cursor"
+        required: false
 
 concurrency: pipeline
 
@@ -18,7 +21,7 @@ jobs:
   ingest:
     if: vars.PIPELINE_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 240
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -40,3 +43,4 @@ jobs:
           itn ingest
           ${{ inputs.since && format('--since {0}', inputs.since) || '' }}
           ${{ inputs.since_congress && format('--since-congress {0}', inputs.since_congress) || '' }}
+          ${{ inputs.since_date && format('--since-date {0}', inputs.since_date) || '' }}

@@ -34,6 +34,15 @@ def usc_section(title: int | str, section: str, edition_year: int | None = None)
     return f"{base}@{edition_year}" if edition_year else base
 
 
+def component(artifact_id: str, ord: int, kind: str) -> str:
+    """One opinion within a case: majority, concurrence, dissent, ..."""
+    return f"{artifact_id}#{int(ord)}-{_slug(kind)}"
+
+
 def text_key(artifact_id: str) -> str:
     """R2 key for an artifact's cleaned text."""
     return f"text/{artifact_id}.txt"
+
+
+def component_text_key(component_id: str) -> str:
+    return text_key(component_id.replace("#", "/"))
