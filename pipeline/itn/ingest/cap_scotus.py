@@ -9,6 +9,7 @@ request each, and the `scotus` source fills in what CAP doesn't have.
 import io
 import json
 import re
+import time
 import zipfile
 
 from itn import db, http, ids
@@ -24,6 +25,9 @@ _US_CITE = re.compile(r"^(\d+)\s+U\.\s?S\.\s+(\d+)$")
 KINDS = {"majority": "majority", "plurality": "plurality", "concurrence": "concurrence",
          "dissent": "dissent", "concurring-in-part-and-dissenting-in-part": "concurrence_in_part",
          "per-curiam": "majority", "unanimous": "unanimous"}
+# U.S. Reports volumes also print thousands of one-line orders ("Certiorari denied.")
+# as cases. A decision with an actual opinion runs well past this many characters.
+MIN_OPINION_CHARS = 3000
 _AUTHOR = re.compile(r"^(mr\.\s+)?(chief\s+)?justice\s+", re.I)
 
 
@@ -81,9 +85,12 @@ def to_components(aid: str, case: dict) -> list[tuple[dict, str]]:
     return out
 
 
-def case_files(data: bytes) -> list[str]:
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        return [n for n in sorted(z.namelist()) if re.search(r"(^|/)(cases|json)/[^/]+\.json$", n)]
+def is_decision(case: dict) -> bool:
+    """A Court opinion of real length; a long dissent from a denial of certiorari is
+    still an order."""
+    opinions = (case.get("casebody") or {}).get("opinions") or []
+    return any(KINDS.get((op.get("type") or "").lower()) in ("majority", "plurality", "unanimous")
+               and len(op.get("text") or "") >= MIN_OPINION_CHARS for op in opinions)
 
 
 def cases_in_zip(data: bytes):
@@ -106,37 +113,33 @@ def volumes(client) -> list[int]:
     return sorted(set(nums))
 
 
-def run(conn, r2=None, fetch_text: bool = True, **_) -> int:
+def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) -> int:
+    deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
-    done = set(cursor.get("done_volumes", []))
+    # v2: earlier runs loaded orders as cases; re-reading those volumes takes them out of scope.
+    done = set(cursor.get("done_volumes_v2", []))
     count = 0
     with http.client(timeout=300) as client:
         todo = [v for v in volumes(client) if v not in done]
         if not todo:
             print("CAP: no new volumes", flush=True)
         for vol in todo:
+            if time.monotonic() > deadline:
+                print(f"Time budget reached before CAP volume {vol}; resuming next run", flush=True)
+                break
             resp = get(client, f"{BASE}/{vol}.zip")
             if resp.is_error:
                 print(f"CAP volume {vol}: {resp.status_code}; retrying next run", flush=True)
                 break
-            try:
-                files = case_files(resp.content)
-            except zipfile.BadZipFile:
-                files = []
-            if not files:
-                print(f"CAP volume {vol}: no case files ({len(resp.content)} bytes, "
-                      f"{resp.headers.get('content-type')}): {resp.content[:200]!r}", flush=True)
-                continue
-            n, why = 0, {"no_us_cite": 0, "before_2000": 0, "no_opinions": 0}
+            n, orders, before = 0, set(), 0
             for case in cases_in_zip(resp.content):
                 cite = us_cite(case)
                 date = case.get("decision_date") or ""
-                comps_raw = (case.get("casebody") or {}).get("opinions") or []
-                if not cite or date < SCOPE_START or not comps_raw:
-                    why["no_us_cite" if not cite else "before_2000" if date < SCOPE_START else "no_opinions"] += 1
-                    if n == 0 and sum(why.values()) == 1:
-                        print(f"CAP volume {vol} sample: keys={sorted(case)[:20]} "
-                              f"citations={case.get('citations')} date={date!r}", flush=True)
+                if not cite or date < SCOPE_START:
+                    before += 1
+                    continue
+                if not is_decision(case):
+                    orders.add(ids.scotus_case(*cite))
                     continue
                 artifact = to_artifact(case, *cite)
                 comps = to_components(artifact["id"], case)
@@ -150,10 +153,16 @@ def run(conn, r2=None, fetch_text: bool = True, **_) -> int:
                     db.replace_citations(conn, comp["id"], citations.EXTRACTOR,
                                          citations.extract(text, date))
                 conn.commit()
+                orders.discard(artifact["id"])
                 n += 1
+            if orders:
+                conn.execute(
+                    "UPDATE artifact SET in_scope = false, metadata = metadata || '{\"order\": true}'"
+                    " WHERE id = ANY(%s) AND metadata->>'source' = 'cap'", (sorted(orders),))
             count += n
             done.add(vol)
-            db.set_cursor(conn, SOURCE, {"done_volumes": sorted(done)})
+            db.set_cursor(conn, SOURCE, {"done_volumes_v2": sorted(done)})
             conn.commit()
-            print(f"CAP volume {vol}: {n} cases ({count} so far), skipped {why}", flush=True)
+            print(f"CAP volume {vol}: {n} decisions ({count} so far); {len(orders)} order pages "
+                  f"and {before} pre-2000 entries skipped", flush=True)
     return count
