@@ -1,0 +1,34 @@
+# Free: checks that the public data domain serves the manifest and catalog
+# with CORS headers the site needs.
+name: Data check
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: [".github/workflows/data-check.yml"]
+  workflow_run:
+    workflows: [Publish data]
+    types: [completed]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      BASE: ${{ vars.PUBLIC_DATA_BASE_URL }}
+      ORIGIN: https://mendus59.github.io
+    steps:
+      - name: Manifest
+        run: |
+          echo "Base URL: '$BASE'"
+          curl -sS -D - -o manifest.json -H "Origin: $ORIGIN" "$BASE/manifest.json"
+          echo; head -c 500 manifest.json; echo
+      - name: CORS preflight
+        run: curl -sS -D - -o /dev/null -X OPTIONS -H "Origin: $ORIGIN" -H "Access-Control-Request-Method: GET" "$BASE/manifest.json"
+      - name: Catalog
+        run: |
+          prefix=$(python3 -c "import json; print(json.load(open('manifest.json'))['prefix'])")
+          curl -sS -D - -o catalog.json -H "Origin: $ORIGIN" "$BASE/$prefix/catalog.json"
+          python3 -c "import json; d=json.load(open('catalog.json')); print(len(d), 'artifacts')"
+      - name: Require CORS header
+        run: |
+          curl -sS -D - -o /dev/null -H "Origin: $ORIGIN" "$BASE/manifest.json" | grep -i '^access-control-allow-origin' \
+            || { echo "::error::No Access-Control-Allow-Origin header for $ORIGIN. Add it to the R2 bucket's CORS policy."; exit 1; }
