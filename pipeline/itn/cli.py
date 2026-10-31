@@ -14,7 +14,7 @@ def cmd_migrate(args) -> None:
 
 
 def cmd_ingest(args) -> None:
-    from itn.ingest import congress_laws, courtlistener_scotus, federal_register
+    from itn.ingest import cap_scotus, congress_laws, courtlistener_scotus, federal_register
     from itn.storage import R2
 
     r2 = None if args.no_text else R2()
@@ -24,6 +24,7 @@ def cmd_ingest(args) -> None:
         "congress-laws": lambda conn: congress_laws.run(
             conn, r2=r2, since_congress=args.since_congress, fetch_text=not args.no_text,
             max_minutes=args.max_minutes),
+        "scotus-bulk": lambda conn: cap_scotus.run(conn, r2=r2, fetch_text=not args.no_text),
         "scotus": lambda conn: courtlistener_scotus.run(
             conn, r2=r2, since=args.since_date, fetch_text=not args.no_text,
             max_minutes=args.max_minutes),
@@ -58,7 +59,7 @@ def main(argv=None) -> None:
     sub.add_parser("migrate", help="apply database migrations").set_defaults(fn=cmd_migrate)
 
     ing = sub.add_parser("ingest", help="pull public records (free)")
-    ing.add_argument("sources", nargs="*", choices=["federal-register", "congress-laws", "scotus"])
+    ing.add_argument("sources", nargs="*", choices=["federal-register", "congress-laws", "scotus-bulk", "scotus"])
     ing.add_argument("--since", type=int, help="Federal Register: first year to (re)ingest")
     ing.add_argument("--since-congress", type=int, help="Congress.gov: first Congress to (re)ingest")
     ing.add_argument("--since-date", help="Supreme Court: first filing date to (re)ingest, YYYY-MM-DD")

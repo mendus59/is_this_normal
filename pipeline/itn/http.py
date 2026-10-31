@@ -9,8 +9,8 @@ RETRY_STATUSES = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
 USER_AGENT = "IsThisNormal pipeline (+https://hownormalisthis.com)"
 
 
-def client(**kwargs) -> httpx.Client:
-    return httpx.Client(timeout=120, headers={"User-Agent": USER_AGENT}, **kwargs)
+def client(timeout: float = 120, **kwargs) -> httpx.Client:
+    return httpx.Client(timeout=timeout, headers={"User-Agent": USER_AGENT}, **kwargs)
 
 
 def get(client: httpx.Client, url: str, params=None, attempts: int = 6,
