@@ -79,3 +79,47 @@ def test_cluster_from_search_hit():
     assert c["date_filed"] == "2022-06-24"
     assert artifact_id(c, c["docket_number"]) == "scotus/597-us-215"
     assert c["citations"][1] == {"volume": "142", "reporter": "S. Ct.", "page": "2228"}
+
+
+def test_cap_case_mapping():
+    import io
+    import json
+    import zipfile
+
+    from itn.ingest import cap_scotus
+
+    case = {"id": 1, "name_abbreviation": "Bush v. Gore", "decision_date": "2000-12-12",
+            "docket_number": "00-949", "citations": [{"type": "official", "cite": "531 U.S. 98"}],
+            "casebody": {"opinions": [
+                {"type": "per-curiam", "author": None, "text": "Per Curiam. " + "x" * 3000},
+                {"type": "dissent", "author": "Justice Stevens, with whom Justice Ginsburg and "
+                                              "Justice Breyer join, dissenting.", "text": "I dissent."}]}}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("json/0098-01.json", json.dumps(case))
+        z.writestr("531/CasesMetadata.json", "[]")
+    [loaded] = list(cap_scotus.cases_in_zip(buf.getvalue()))
+    assert loaded["file_name"] == "0098-01"
+    a = cap_scotus.to_artifact(loaded, *cap_scotus.us_cite(loaded))
+    assert a["id"] == "scotus/531-us-98" and a["in_scope"] is True
+    comps = cap_scotus.to_components(a["id"], loaded)
+    assert [c["kind"] for c, _ in comps] == ["majority", "dissent"]
+    assert comps[1][0]["author"] == "Stevens"
+
+
+def test_cap_author_cleanup():
+    from itn.ingest.cap_scotus import clean_author
+
+    assert clean_author("Chief Justice Rehnquist delivered the opinion of the Court.") == "Rehnquist"
+    assert clean_author("Justice O'Connor, concurring.") == "O'Connor"
+    assert clean_author(None) is None
+
+
+def test_cap_orders_are_not_decisions():
+    from itn.ingest.cap_scotus import is_decision
+
+    order = {"casebody": {"opinions": [{"type": "majority", "text": "Certiorari denied."}]}}
+    assert not is_decision(order)
+    assert is_decision({"casebody": {"opinions": [{"type": "majority", "text": "x" * 5000}]}})
+    denial_dissent = {"casebody": {"opinions": [{"type": "dissent", "text": "x" * 9000}]}}
+    assert not is_decision(denial_dissent)

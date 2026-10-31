@@ -161,7 +161,7 @@ class CourtListener:
         url = url if url.startswith("http") else f"{API}{url}"
         resp = get(self.client, url, params=params, max_wait=MAX_RATE_WAIT_SECONDS)
         if resp.status_code == 429:
-            raise RateLimited(f"Retry-After {resp.headers.get('Retry-After', '?')}s")
+            raise RateLimited(f"Retry-After {resp.headers.get('Retry-After', '?')}s: {resp.text[:300]}")
         if resp.is_error:
             raise RuntimeError(f"CourtListener returned {resp.status_code} for {url}: {resp.text[:500]}")
         return resp.json()
@@ -195,9 +195,11 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
                 if time.monotonic() > deadline:
                     print(f"Time budget reached at {cluster.get('date_filed')}; resuming next run", flush=True)
                     break
+                # Skip cases already loaded from here or from the CAP bulk source.
+                aid_guess = artifact_id(cluster, cluster["docket_number"])
                 done = conn.execute(
-                    "SELECT 1 FROM artifact WHERE metadata->>'courtlistener_cluster' = %s"
-                    " AND metadata ? 'opinions'", (str(cluster["id"]),)).fetchone()
+                    "SELECT 1 FROM artifact WHERE (metadata->>'courtlistener_cluster' = %s OR id = %s)"
+                    " AND metadata ? 'opinions'", (str(cluster["id"]), aid_guess)).fetchone()
                 # Don't hold a transaction open across network waits.
                 conn.commit()
                 if not done:
