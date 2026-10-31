@@ -195,11 +195,13 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
                 if time.monotonic() > deadline:
                     print(f"Time budget reached at {cluster.get('date_filed')}; resuming next run", flush=True)
                     break
-                # Skip cases already loaded from here or from the CAP bulk source.
+                # Skip cases already loaded from here, CAP, or supremecourt.gov.
                 aid_guess = artifact_id(cluster, cluster["docket_number"])
                 done = conn.execute(
-                    "SELECT 1 FROM artifact WHERE (metadata->>'courtlistener_cluster' = %s OR id = %s)"
-                    " AND metadata ? 'opinions'", (str(cluster["id"]), aid_guess)).fetchone()
+                    "SELECT 1 FROM artifact WHERE (metadata->>'courtlistener_cluster' = %s OR id = %s"
+                    " OR (type = 'scotus_case' AND metadata->>'docket_number' = %s))"
+                    " AND metadata ? 'opinions'",
+                    (str(cluster["id"]), aid_guess, cluster["docket_number"] or "")).fetchone()
                 # Don't hold a transaction open across network waits.
                 conn.commit()
                 if not done:
