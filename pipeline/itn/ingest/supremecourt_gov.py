@@ -12,6 +12,7 @@ import html
 import io
 import re
 import time
+from urllib.parse import urljoin
 
 from pypdf import PdfReader
 
@@ -26,7 +27,7 @@ DELAY_SECONDS = 1.0
 
 _ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S | re.I)
 _CELL = re.compile(r"<td[^>]*>(.*?)</td>", re.S | re.I)
-_PDF = re.compile(r'href="([^"]*/opinions/\d\dpdf/[^"]+\.pdf)"', re.I)
+_PDF = re.compile(r"""href=["']([^"']*\d\dpdf/[^"']+\.pdf)["']""", re.I)
 _DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2})$")
 
 # Running headers that name the opinion a page belongs to.
@@ -42,7 +43,7 @@ def term_of(day: dt.date) -> int:
     return day.year if day.month >= 10 else day.year - 1
 
 
-def parse_term_table(page: str) -> list[dict]:
+def parse_term_table(page: str, base: str = f"{SITE}/opinions/slipopinion/") -> list[dict]:
     """Rows of a slip opinion table: date, docket, name, author column, PDF URL."""
     rows = []
     for row in _ROW.findall(page):
@@ -57,10 +58,10 @@ def parse_term_table(page: str) -> list[dict]:
             continue
         m, d, y = (int(x) for x in _DATE.match(date).groups())
         i = cells.index(docket)
-        url = pdf.group(1)
+        url = urljoin(base, pdf.group(1))
         rows.append({"date": dt.date(2000 + y, m, d).isoformat(), "docket": docket,
                      "name": cells[i + 1] if i + 1 < len(cells) else docket,
-                     "pdf": url if url.startswith("http") else SITE + url})
+                     "pdf": url})
     return rows
 
 
@@ -185,10 +186,11 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
             if resp.is_error:
                 print(f"Term {term}: {resp.status_code}; retrying next run", flush=True)
                 break
-            rows = parse_term_table(resp.text)
+            rows = parse_term_table(resp.text, str(resp.url))
             print(f"Term {term}: {len(rows)} opinions listed", flush=True)
             if not rows:
-                i = resp.text.find("pdf")
+                m = re.search(r"\d\dpdf/", resp.text)
+                i = m.start() if m else resp.text.find("pdf")
                 print(f"Term {term}: no rows parsed from {len(resp.text)} chars "
                       f"({resp.headers.get('content-type')}); {resp.text.count('.pdf')} PDF links; "
                       f"near first: {resp.text[max(0, i - 400):i + 200]!r}", flush=True)
