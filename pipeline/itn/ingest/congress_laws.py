@@ -177,6 +177,8 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
     latest = current_congress(dt.date.today().year)
     start = since_congress or cursor.get("next_congress") or FIRST_CONGRESS
     count = skipped = 0
+    # The cursor never moves past a Congress with skipped laws, so the next run retries them.
+    first_incomplete = None
     with http.client() as client:
         api = CongressAPI(client, key)
         for congress in range(start, latest + 1):
@@ -200,6 +202,7 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
                     # One bad record shouldn't stop the backfill; it is retried next run.
                     print(f"Skipping {law_number} for now: {str(err)[:200]}", flush=True)
                     skipped += 1
+                    first_incomplete = first_incomplete or congress
                     continue
                 artifact = to_artifact(bill, law_number, enacted, summary, votes)
                 if fetch_text and r2:
@@ -215,7 +218,8 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
                 conn.commit()
                 count += 1
             # Re-scan the current Congress every run so new laws are picked up.
-            db.set_cursor(conn, SOURCE, {"next_congress": min(congress + 1, latest)})
+            db.set_cursor(conn, SOURCE,
+                          {"next_congress": first_incomplete or min(congress + 1, latest)})
             conn.commit()
             print(f"Congress {congress}: done ({count} laws so far, {skipped} skipped)", flush=True)
     return count

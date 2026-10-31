@@ -14,9 +14,18 @@ def client(**kwargs) -> httpx.Client:
 
 
 def get(client: httpx.Client, url: str, params=None, attempts: int = 6) -> httpx.Response:
-    """GET with backoff on rate limits and server errors, honoring Retry-After."""
+    """GET with backoff on rate limits, server errors and dropped connections,
+    honoring Retry-After."""
     for attempt in range(attempts):
-        resp = client.get(url, params=params, follow_redirects=True)
+        try:
+            resp = client.get(url, params=params, follow_redirects=True)
+        except httpx.TransportError as err:
+            if attempt == attempts - 1:
+                raise
+            wait = min(300, 15 * 2**attempt)
+            print(f"{type(err).__name__} from {url.split('?')[0]}; retrying in {wait}s", flush=True)
+            time.sleep(wait)
+            continue
         if resp.status_code not in RETRY_STATUSES or attempt == attempts - 1:
             return resp
         retry_after = resp.headers.get("Retry-After", "")

@@ -58,3 +58,23 @@ def test_get_retries_after_rate_limit(monkeypatch):
         resp = http.get(client, "https://example.test/doc.txt")
     assert resp.status_code == 200
     assert len(calls) == 2
+
+
+def test_get_retries_after_dropped_connection(monkeypatch):
+    import httpx
+
+    from itn import http
+
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            raise httpx.RemoteProtocolError("incomplete chunked read", request=request)
+        return httpx.Response(200, text="ok")
+
+    monkeypatch.setattr(http.time, "sleep", lambda s: None)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        resp = http.get(client, "https://example.test/doc.txt")
+    assert resp.status_code == 200
+    assert len(calls) == 2
