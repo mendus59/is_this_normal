@@ -16,6 +16,10 @@ def test_final_passage_detection():
     assert is_final_passage("On motion to suspend the rules and pass the bill Agreed to by the Yeas and Nays: (2/3 required): 402 - 15 (Roll no. 88).")
     assert is_final_passage("Senate agreed to conference report by Yea-Nay Vote. 51 - 48.")
     assert is_final_passage("Resolving differences -- Senate actions: Senate concurred in House amendment by Yea-Nay Vote. 60 - 39.")
+    assert is_final_passage("On motion that the House agree to the Senate amendments Agreed to by recorded vote: 219 - 212 (Roll no. 165).")
+    assert is_final_passage("On motion to suspend the rules and agree to the Senate amendment Agreed to by the Yeas and Nays: (2/3 required): 300 - 100 (Roll no. 12).")
+    assert is_final_passage("On motion that the House agree with an amendment to the Senate amendment Agreed to by recorded vote: 220 - 205 (Roll no. 40).")
+    assert is_final_passage("Senate agreed to the House amendment to the Senate amendment by Yea-Nay Vote. 60 - 39.")
     assert not is_final_passage("Cloture motion on the motion to proceed invoked in Senate by Yea-Nay Vote. 60 - 40.")
     assert not is_final_passage("On motion to recommit with instructions Failed by the Yeas and Nays: 200 - 220.")
 

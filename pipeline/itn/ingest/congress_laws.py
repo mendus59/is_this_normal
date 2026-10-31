@@ -32,9 +32,12 @@ BILL_TYPE_URL = {"HR": "house-bill", "S": "senate-bill", "HJRES": "house-joint-r
 _COUNTS = re.compile(r"(\d+)\s*-\s*(\d+)")
 _PASSAGE = re.compile(
     r"on passage|passed (house|senate)|passed by|and pass|conference report|"
-    r"agreed to by|concur|override|resolution agreed",
+    r"agreed to by|concur|override|resolution agreed|"
+    r"agree\w*( with an amendment)? (to|in) the (house|senate) amendment",
     re.I,
 )
+# Bump when the vote rules change so already-loaded laws are re-checked.
+VOTE_RULES_VERSION = 2
 _NOT_PASSAGE = re.compile(r"cloture|motion to (proceed|table|recommit|instruct)|previous question|"
                           r"rule providing|waive", re.I)
 
@@ -106,6 +109,7 @@ def to_artifact(bill: dict, law_number: str, enacted: str | None, summary: str |
             "bill": f"{bill_slug}-{bill['congress']}",
             "votes": votes,
             "contentious": is_contentious,
+            "vote_rules": VOTE_RULES_VERSION,
         },
     }
 
@@ -192,8 +196,9 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
                     return count
                 aid = ids.public_law(*law_number.split("-"))
                 row = conn.execute(
-                    "SELECT metadata ? 'votes', text_key IS NOT NULL OR metadata ? 'text_missing'"
-                    " FROM artifact WHERE id = %s", (aid,)).fetchone()
+                    "SELECT (metadata->>'vote_rules')::int IS NOT DISTINCT FROM %s,"
+                    " text_key IS NOT NULL OR metadata ? 'text_missing'"
+                    " FROM artifact WHERE id = %s", (VOTE_RULES_VERSION, aid)).fetchone()
                 if row and row[0] and (row[1] or not fetch_text):
                     continue  # already complete
                 try:
@@ -205,7 +210,7 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
                     first_incomplete = first_incomplete or congress
                     continue
                 artifact = to_artifact(bill, law_number, enacted, summary, votes)
-                if fetch_text and r2:
+                if fetch_text and r2 and not (row and row[1]):
                     c, n = law_number.split("-")
                     resp = get(client, GOVINFO_TEXT.format(c=c, n=n))
                     if resp.is_success:
