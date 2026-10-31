@@ -11,8 +11,9 @@ from collections.abc import Iterator
 
 import httpx
 
-from itn import db, ids
+from itn import db, http, ids
 from itn.config import SCOPE_START
+from itn.http import get
 
 API = "https://www.federalregister.gov/api/v1/documents.json"
 SOURCE = "federal_register"
@@ -27,22 +28,8 @@ def _slug(value: str | None) -> str | None:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") if value else None
 
 
-RETRY_STATUSES = {429, 500, 502, 503, 504}
 # Pause between plain-text downloads so a full backfill stays under the site's rate limit.
 TEXT_DELAY_SECONDS = 1.0
-
-
-def get(client: httpx.Client, url: str, params=None, attempts: int = 6) -> httpx.Response:
-    """GET with backoff on rate limits and server errors, honoring Retry-After."""
-    for attempt in range(attempts):
-        resp = client.get(url, params=params, follow_redirects=True)
-        if resp.status_code not in RETRY_STATUSES or attempt == attempts - 1:
-            return resp
-        retry_after = resp.headers.get("Retry-After", "")
-        wait = int(retry_after) if retry_after.isdigit() else min(300, 15 * 2**attempt)
-        print(f"{resp.status_code} from {url}; retrying in {wait}s", flush=True)
-        time.sleep(wait)
-    return resp
 
 
 def fetch_year(client: httpx.Client, year: int) -> Iterator[dict]:
@@ -109,7 +96,7 @@ def run(conn, r2=None, since_year: int | None = None, fetch_text: bool = True) -
     start = since_year or cursor.get("next_year") or int(SCOPE_START[:4])
     this_year = dt.date.today().year
     count = 0
-    with httpx.Client(timeout=60, headers={"User-Agent": "IsThisNormal pipeline"}) as client:
+    with http.client() as client:
         for year in range(start, this_year + 1):
             for doc in fetch_year(client, year):
                 artifact = to_artifact(doc)

@@ -43,7 +43,7 @@ def test_pre_2000_is_reference_only():
 def test_get_retries_after_rate_limit(monkeypatch):
     import httpx
 
-    from itn.ingest import federal_register as fr
+    from itn import http
 
     calls = []
 
@@ -53,8 +53,8 @@ def test_get_retries_after_rate_limit(monkeypatch):
             return httpx.Response(429, headers={"Retry-After": "0"})
         return httpx.Response(200, text="ok")
 
-    monkeypatch.setattr(fr.time, "sleep", lambda s: None)
+    monkeypatch.setattr(http.time, "sleep", lambda s: None)
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        resp = fr.get(client, "https://example.test/doc.txt")
+        resp = http.get(client, "https://example.test/doc.txt")
     assert resp.status_code == 200
     assert len(calls) == 2
