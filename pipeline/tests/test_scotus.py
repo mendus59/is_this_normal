@@ -96,7 +96,7 @@ def test_cap_case_mapping():
                                               "Justice Breyer join, dissenting.", "text": "I dissent."}]}}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("531/cases/0098-01.json", json.dumps(case))
+        z.writestr("json/0098-01.json", json.dumps(case))
         z.writestr("531/CasesMetadata.json", "[]")
     [loaded] = list(cap_scotus.cases_in_zip(buf.getvalue()))
     assert loaded["file_name"] == "0098-01"

@@ -56,8 +56,6 @@ def to_artifact(case: dict, vol: str, page: str) -> dict:
         "closure_depth": 0,
         "sources": [
             {"label": "Justia", "url": f"https://supreme.justia.com/cases/federal/us/{vol}/{page}/"},
-            {"label": "Caselaw Access Project", "url": f"https://static.case.law/us/{vol}/cases/"
-                                                      f"{case.get('file_name', '')}.json"},
         ],
         "official_summary": None,
         "text_key": None,
@@ -66,6 +64,7 @@ def to_artifact(case: dict, vol: str, page: str) -> dict:
             "us_cite": f"{vol} U.S. {page}",
             "docket_number": case.get("docket_number"),
             "cap_id": case.get("id"),
+            "cap_file": f"us/{vol}.zip:{case.get('file_name')}",
             "judges": body.get("judges"),
             "source": "cap",
         },
@@ -84,13 +83,13 @@ def to_components(aid: str, case: dict) -> list[tuple[dict, str]]:
 
 def case_files(data: bytes) -> list[str]:
     with zipfile.ZipFile(io.BytesIO(data)) as z:
-        return [n for n in sorted(z.namelist()) if re.search(r"(^|/)cases/[^/]+\.json$", n)]
+        return [n for n in sorted(z.namelist()) if re.search(r"(^|/)(cases|json)/[^/]+\.json$", n)]
 
 
 def cases_in_zip(data: bytes):
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         for name in sorted(z.namelist()):
-            if re.search(r"(^|/)cases/[^/]+\.json$", name):
+            if re.search(r"(^|/)(cases|json)/[^/]+\.json$", name):
                 case = json.loads(z.read(name))
                 case.setdefault("file_name", name.rsplit("/", 1)[-1][:-5])
                 yield case
