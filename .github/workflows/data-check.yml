@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE: ${{ vars.PUBLIC_DATA_BASE_URL }}
-      ORIGIN: https://mendus59.github.io
+      ORIGIN: ${{ vars.SITE_ORIGIN || 'https://hownormalisthis.com' }}
     steps:
       - name: Manifest
         run: |
