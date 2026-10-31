@@ -177,7 +177,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
     deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
     current = term_of(dt.date.today())
-    start = cursor.get("next_term", FIRST_TERM)
+    start = cursor.get("next_term_v2", FIRST_TERM)
     count = 0
     with http.client(timeout=180) as client:
         for term in range(start, current + 1):
@@ -187,6 +187,12 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
                 break
             rows = parse_term_table(resp.text)
             print(f"Term {term}: {len(rows)} opinions listed", flush=True)
+            if not rows:
+                i = resp.text.find("pdf")
+                print(f"Term {term}: no rows parsed from {len(resp.text)} chars "
+                      f"({resp.headers.get('content-type')}); {resp.text.count('.pdf')} PDF links; "
+                      f"near first: {resp.text[max(0, i - 400):i + 200]!r}", flush=True)
+                break
             for row in rows:
                 if time.monotonic() > deadline:
                     print(f"Time budget reached in term {term}; resuming next run", flush=True)
@@ -221,7 +227,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
                 conn.commit()
                 count += 1
             # Re-scan the current term every run so new opinions are picked up.
-            db.set_cursor(conn, SOURCE, {"next_term": min(term + 1, current)})
+            db.set_cursor(conn, SOURCE, {"next_term_v2": min(term + 1, current)})
             conn.commit()
             print(f"Term {term}: done ({count} cases so far)", flush=True)
     return count
