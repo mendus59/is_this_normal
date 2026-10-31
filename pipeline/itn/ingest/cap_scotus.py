@@ -82,6 +82,11 @@ def to_components(aid: str, case: dict) -> list[tuple[dict, str]]:
     return out
 
 
+def case_files(data: bytes) -> list[str]:
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        return [n for n in sorted(z.namelist()) if re.search(r"(^|/)cases/[^/]+\.json$", n)]
+
+
 def cases_in_zip(data: bytes):
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         for name in sorted(z.namelist()):
@@ -104,9 +109,10 @@ def volumes(client) -> list[int]:
 
 def run(conn, r2=None, fetch_text: bool = True, **_) -> int:
     cursor = db.get_cursor(conn, SOURCE) or {}
+    done = set(cursor.get("done_volumes", []))
     count = 0
     with http.client(timeout=300) as client:
-        todo = [v for v in volumes(client) if v >= cursor.get("next_volume", FIRST_VOLUME)]
+        todo = [v for v in volumes(client) if v not in done]
         if not todo:
             print("CAP: no new volumes", flush=True)
         for vol in todo:
@@ -114,12 +120,24 @@ def run(conn, r2=None, fetch_text: bool = True, **_) -> int:
             if resp.is_error:
                 print(f"CAP volume {vol}: {resp.status_code}; retrying next run", flush=True)
                 break
-            n = 0
+            try:
+                files = case_files(resp.content)
+            except zipfile.BadZipFile:
+                files = []
+            if not files:
+                print(f"CAP volume {vol}: no case files ({len(resp.content)} bytes, "
+                      f"{resp.headers.get('content-type')}): {resp.content[:200]!r}", flush=True)
+                continue
+            n, why = 0, {"no_us_cite": 0, "before_2000": 0, "no_opinions": 0}
             for case in cases_in_zip(resp.content):
                 cite = us_cite(case)
                 date = case.get("decision_date") or ""
                 comps_raw = (case.get("casebody") or {}).get("opinions") or []
                 if not cite or date < SCOPE_START or not comps_raw:
+                    why["no_us_cite" if not cite else "before_2000" if date < SCOPE_START else "no_opinions"] += 1
+                    if n == 0 and sum(why.values()) == 1:
+                        print(f"CAP volume {vol} sample: keys={sorted(case)[:20]} "
+                              f"citations={case.get('citations')} date={date!r}", flush=True)
                     continue
                 artifact = to_artifact(case, *cite)
                 comps = to_components(artifact["id"], case)
@@ -135,7 +153,8 @@ def run(conn, r2=None, fetch_text: bool = True, **_) -> int:
                 conn.commit()
                 n += 1
             count += n
-            db.set_cursor(conn, SOURCE, {"next_volume": vol + 1})
+            done.add(vol)
+            db.set_cursor(conn, SOURCE, {"done_volumes": sorted(done)})
             conn.commit()
-            print(f"CAP volume {vol}: {n} cases ({count} so far)", flush=True)
+            print(f"CAP volume {vol}: {n} cases ({count} so far), skipped {why}", flush=True)
     return count

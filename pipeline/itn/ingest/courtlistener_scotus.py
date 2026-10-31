@@ -161,7 +161,7 @@ class CourtListener:
         url = url if url.startswith("http") else f"{API}{url}"
         resp = get(self.client, url, params=params, max_wait=MAX_RATE_WAIT_SECONDS)
         if resp.status_code == 429:
-            raise RateLimited(f"Retry-After {resp.headers.get('Retry-After', '?')}s")
+            raise RateLimited(f"Retry-After {resp.headers.get('Retry-After', '?')}s: {resp.text[:300]}")
         if resp.is_error:
             raise RuntimeError(f"CourtListener returned {resp.status_code} for {url}: {resp.text[:500]}")
         return resp.json()
