@@ -12,6 +12,8 @@ import re
 import time
 import xml.etree.ElementTree as ET
 
+import httpx
+
 from itn import db, http, ids
 from itn.config import CONTENTIOUS_THRESHOLD, SCOPE_START, require
 from itn.http import get
@@ -174,7 +176,7 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
     cursor = db.get_cursor(conn, SOURCE) or {}
     latest = current_congress(dt.date.today().year)
     start = since_congress or cursor.get("next_congress") or FIRST_CONGRESS
-    count = 0
+    count = skipped = 0
     with http.client() as client:
         api = CongressAPI(client, key)
         for congress in range(start, latest + 1):
@@ -192,7 +194,13 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
                     " FROM artifact WHERE id = %s", (aid,)).fetchone()
                 if row and row[0] and (row[1] or not fetch_text):
                     continue  # already complete
-                enacted, summary, votes = law_details(api, client, bill)
+                try:
+                    enacted, summary, votes = law_details(api, client, bill)
+                except (RuntimeError, httpx.HTTPError) as err:
+                    # One bad record shouldn't stop the backfill; it is retried next run.
+                    print(f"Skipping {law_number} for now: {str(err)[:200]}", flush=True)
+                    skipped += 1
+                    continue
                 artifact = to_artifact(bill, law_number, enacted, summary, votes)
                 if fetch_text and r2:
                     c, n = law_number.split("-")
@@ -209,5 +217,5 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
             # Re-scan the current Congress every run so new laws are picked up.
             db.set_cursor(conn, SOURCE, {"next_congress": min(congress + 1, latest)})
             conn.commit()
-            print(f"Congress {congress}: done ({count} laws so far)", flush=True)
+            print(f"Congress {congress}: done ({count} laws so far, {skipped} skipped)", flush=True)
     return count

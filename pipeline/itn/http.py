@@ -4,7 +4,8 @@ import time
 
 import httpx
 
-RETRY_STATUSES = {429, 500, 502, 503, 504}
+# 520-524 are Cloudflare's origin errors, which Congress.gov returns intermittently.
+RETRY_STATUSES = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
 USER_AGENT = "IsThisNormal pipeline (+https://hownormalisthis.com)"
 
 
