@@ -27,3 +27,12 @@ def test_page_numbers_and_offset():
     numbers = [None, None] + list(range(1, 40))
     assert page_offset(numbers) == 2
     assert page_offset([None] * 30) is None
+
+
+def test_case_start():
+    from itn.ingest.scotus_bound import case_start
+    page = ("644 OCTOBER TERM, 2014\nSyllabus\nOBERGEFELL ET AL. v. HODGES, DIRECTOR, OHIO\n"
+            "CERTIORARI TO THE UNITED STATES COURT OF APPEALS FOR THE SIXTH CIRCUIT\n"
+            "No. 14–556. Argued April 28, 2015—Decided June 26, 2015*")
+    assert case_start(page) == {"docket": "14-556", "date": "2015-06-26"}
+    assert case_start("650 OBERGEFELL v. HODGES\nOpinion of the Court\nNo. 14–556 text") is None

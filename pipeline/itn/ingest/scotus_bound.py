@@ -1,10 +1,10 @@
 """Supreme Court opinions cut from the Court's bound volumes and preliminary prints of
-the U.S. Reports, for terms the Court's slip opinion lists no longer cover.
+the U.S. Reports (https://www.supremecourt.gov/opinions/USReports.aspx), for terms the
+Court's slip opinion lists no longer cover.
 
-The list of cases, with each one's U.S. Reports citation, comes from Oyez's free API
-(https://api.oyez.org). The volumes come from https://www.supremecourt.gov/opinions/USReports.aspx.
-Each printed page carries its U.S. Reports page number, which locates a case in the PDF;
-a case ends where the next case in the same volume begins.
+A case opens on a caption page naming its docket and decision date, and runs to the
+next one. The printed page numbers give its U.S. Reports citation. Case names come from
+Oyez's free API (https://api.oyez.org), whose citations stop at volume 574.
 """
 
 import datetime as dt
@@ -86,38 +86,48 @@ def page_offset(numbers: list[int | None]) -> int | None:
     return offset if hits >= max(5, len(numbers) // 10) else None
 
 
+_DECIDED = re.compile(r"Decided ([A-Z][a-z]+ \d{1,2}, \d{4})")
+_DOCKET = re.compile(r"\bNos?\. (\d{1,2}[–-]\d{1,5}|\d{1,2}A\d{1,4})")
+GAP = ("2014-10-01", "2019-10-01")  # decision dates no other source has covered
+FIRST_VOLUME, LAST_VOLUME = 574, 591
+
+
+def case_start(text: str) -> dict | None:
+    """Docket and decision date if this page opens a case: the caption page carries
+    "No. 14–556" and "Argued ...—Decided June 26, 2015" near the top."""
+    head = "\n".join(text.splitlines()[:40])
+    decided, docket = _DECIDED.search(head), _DOCKET.search(head)
+    if not (decided and docket):
+        return None
+    try:
+        date = dt.datetime.strptime(decided.group(1), "%B %d, %Y").date().isoformat()
+    except ValueError:
+        return None
+    return {"docket": docket.group(1).replace("–", "-"), "date": date}
+
+
 def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -> int:
     deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
-    done_vols = set(cursor.get("done_volumes", []))
+    done = set(cursor.get("done_pdfs", []))
     count = 0
     with http.client(timeout=600) as client:
-        rows: list[dict] = []
+        names: dict[str, dict] = {}
         for term in range(FIRST_TERM, LAST_TERM + 1):
-            cases = oyez_cases(client, term)
-            term_rows = [r for r in (to_row(c) for c in cases) if r]
-            print(f"Oyez term {term}: {len(cases)} cases, {len(term_rows)} with a U.S. Reports page",
-                  flush=True)
-            rows += term_rows
-        by_vol: dict[str, list[dict]] = {}
-        for r in rows:
-            by_vol.setdefault(r["us_cite"][0], []).append(r)
+            try:
+                for case in oyez_cases(client, term):
+                    if case.get("docket_number"):
+                        names[case["docket_number"].strip()] = case
+            except Exception as err:  # noqa: BLE001 - names are a nicety; dockets still work
+                print(f"Oyez term {term} unavailable: {str(err)[:200]}", flush=True)
+        print(f"Oyez: {len(names)} case names", flush=True)
         resp = get(client, VOLUMES_PAGE)
         resp.raise_for_status()
         pdfs = volume_pdfs(resp.text, str(resp.url))
-        for vol in sorted(by_vol):
-            if vol in done_vols:
-                continue
-            vol_rows = sorted(by_vol[vol], key=lambda r: int(r["us_cite"][1]))
-            todo = [r for r in vol_rows if not sc.already_loaded(conn, r["docket"], r["us_cite"])]
-            if not todo:
-                done_vols.add(vol)
-                continue
-            print(f"Volume {vol}: {len(todo)} of {len(vol_rows)} cases to load; PDFs {pdfs.get(vol)}",
-                  flush=True)
-            starts = sorted({int(r["us_cite"][1]) for r in vol_rows})
-            complete = True
-            for url in pdfs.get(vol, []):
+        for vol in sorted(v for v in pdfs if FIRST_VOLUME <= int(v) <= LAST_VOLUME):
+            for url in pdfs[vol]:
+                if url in done:
+                    continue
                 if time.monotonic() > deadline:
                     print(f"Time budget reached at volume {vol}; resuming next run", flush=True)
                     return count
@@ -126,41 +136,38 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                     pdf = get(client, url)
                     pdf.raise_for_status()
                     reader = PdfReader(io.BytesIO(pdf.content))
-                    numbers = [page_number(p.extract_text() or "") for p in reader.pages]
-                except Exception as err:  # noqa: BLE001 - a bad download defers the volume
+                    texts = [p.extract_text() or "" for p in reader.pages]
+                except Exception as err:  # noqa: BLE001 - a bad download is retried next run
                     print(f"Volume {vol}: skipping {url} for now: {str(err)[:200]}", flush=True)
-                    complete = False
                     continue
-                offset = page_offset(numbers)
-                if offset is None:
-                    print(f"Volume {vol}: no page numbers found in {url}; sample "
-                          f"{[(reader.pages[i].extract_text() or '')[:120] for i in (10, 11)]}",
-                          flush=True)
-                    complete = False
-                    continue
-                first, last = 1 - offset, len(reader.pages) - offset
-                for row in todo:
-                    page = int(row["us_cite"][1])
-                    if not first <= page <= last or row.get("loaded"):
+                offset = page_offset([page_number(t) for t in texts])
+                starts = [(i, c) for i, t in enumerate(texts) if (c := case_start(t))]
+                n = 0
+                for k, (i, case) in enumerate(starts):
+                    if not GAP[0] <= case["date"] < GAP[1]:
                         continue
-                    nxt = next((s for s in starts if s > page), None)
-                    end = nxt + offset if nxt and nxt <= last else None
-                    texts = sc.print_pages(reader, page + offset, end)
-                    syllabus, parts = sc.split_opinions(texts)
+                    page = (i + 1 - offset) if offset is not None else page_number(texts[i])
+                    cite = (vol, str(page)) if page and page > 0 else None
+                    if sc.already_loaded(conn, case["docket"], cite):
+                        continue
+                    end = starts[k + 1][0] if k + 1 < len(starts) else len(texts)
+                    syllabus, parts = sc.split_opinions(texts[i:end])
                     if not parts:
-                        print(f"Skipping {row['docket']}: no opinion text found", flush=True)
                         continue
-                    conn = load(conn, r2, fetch_text, {**row, "pdf": url, "page": page + offset},
-                                syllabus, parts)
-                    row["loaded"] = True
-                    count += 1
-                print(f"Volume {vol}: {url} done ({count} cases so far)", flush=True)
-            missing = [r["docket"] for r in todo if not r.get("loaded")]
-            if missing:
-                print(f"Volume {vol}: not found in any PDF: {missing[:20]}", flush=True)
-            if complete:
-                done_vols.add(vol)
-                db.set_cursor(conn, SOURCE, {"done_volumes": sorted(done_vols)})
+                    oyez = names.get(case["docket"]) or {}
+                    row = {**case, "name": oyez.get("name") or f"No. {case['docket']}",
+                           "pdf": url, "page": i + 1, "oyez": oyez.get("href")}
+                    if cite:
+                        row["us_cite"] = cite
+                    conn = load(conn, r2, fetch_text, row, syllabus, parts)
+                    n += 1
+                count += n
+                print(f"Volume {vol}: {url}: {len(starts)} cases found, {n} loaded "
+                      f"(page offset {offset})", flush=True)
+                if not starts:
+                    print(f"  sample page: {texts[min(30, len(texts) - 1)][:300]!r}", flush=True)
+                done.add(url)
+                db.set_cursor(conn, SOURCE, {"done_pdfs": sorted(done)})
                 conn.commit()
     return count
 
