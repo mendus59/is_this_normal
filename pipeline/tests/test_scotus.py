@@ -128,3 +128,18 @@ def test_cap_orders_are_not_decisions():
 def test_extract_ignores_blank_slip_cites():
     rows = extract("Dobbs v. Jackson Women's Health Org., 597 U. S. ___ (2022); 410 U.S. 113.")
     assert [r["to_artifact"] for r in rows] == ["scotus/410-us-113"]
+
+
+def test_hourly_wait():
+    import httpx
+
+    from itn.ingest.courtlistener_scotus import hourly_wait
+
+    def r(text, after):
+        return httpx.Response(429, text=text, headers={"Retry-After": str(after)})
+
+    hourly = '{"detail":"Rate limit exceeded: 50/hour. Expected available in 2993 seconds."}'
+    daily = '{"detail":"Rate limit exceeded: 125/day. Expected available in 5747 seconds."}'
+    assert hourly_wait(r(hourly, 2993), None, 0) == 2998
+    assert hourly_wait(r(hourly, 2993), 1000, 0) is None  # run would end first
+    assert hourly_wait(r(daily, 5747), None, 0) is None
