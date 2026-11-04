@@ -13,6 +13,7 @@ import re
 import time
 
 import httpx
+import psycopg
 
 from itn import db, http, ids
 from itn.config import SCOPE_START, require
@@ -169,6 +170,7 @@ class CourtListener:
     def __init__(self, client, token: str, deadline: float | None = None):
         self.client = client
         self.deadline = deadline
+        self.waited = False  # set after a long wait; the database connection may be gone
         client.headers["Authorization"] = f"Token {token}"
 
     def get(self, url: str, params=None) -> dict:
@@ -183,6 +185,7 @@ class CourtListener:
                 raise RateLimited(f"Retry-After {resp.headers.get('Retry-After', '?')}s: {resp.text[:300]}")
             print(f"CourtListener hourly limit; waiting {wait}s", flush=True)
             time.sleep(wait)
+            self.waited = True
         if resp.is_error:
             raise RuntimeError(f"CourtListener returned {resp.status_code} for {url}: {resp.text[:500]}")
         return resp.json()
@@ -194,6 +197,20 @@ class CourtListener:
             if not page.get("next"):
                 return
             page = self.get(page["next"])
+
+
+def fresh(conn, cl: CourtListener):
+    """The database drops idle connections during an hourly wait; reconnect after one."""
+    if not cl.waited:
+        return conn
+    cl.waited = False
+    try:
+        conn.execute("SELECT 1")
+        conn.commit()
+        return conn
+    except psycopg.Error:
+        print("Reconnecting to the database after the wait", flush=True)
+        return db.connect()
 
 
 def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
@@ -210,6 +227,7 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
                   "order_by": "dateFiled asc"}
         try:
             for hit in cl.paged("/search/", params):
+                conn = fresh(conn, cl)
                 cluster = cluster_from_hit(hit)
                 if cluster["status"] not in (None, "Published"):
                     continue
@@ -236,6 +254,7 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
                         print(f"Skipping cluster {cluster['id']} for now: {str(err)[:200]}", flush=True)
                         skipped += 1
                         continue
+                    conn = fresh(conn, cl)
                     if not aid:
                         print(f"Skipping cluster {cluster['id']}: no U.S. cite or docket number", flush=True)
                         continue

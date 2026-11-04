@@ -1,0 +1,40 @@
+# Free: runs slow backfill sources side by side, each in its own job, so one source's
+# rate limit doesn't hold up the others. Has no access to the model API key.
+name: Backfill
+on:
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Sources to run in parallel, as a JSON list"
+        required: false
+        default: '["scotus", "scotus-bound", "scotus-gov"]'
+
+jobs:
+  backfill:
+    if: vars.PIPELINE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ fromJSON(inputs.sources || '["scotus", "scotus-bound", "scotus-gov"]') }}
+    concurrency: backfill-${{ matrix.source }}
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      COURTLISTENER_TOKEN: ${{ secrets.COURTLISTENER_TOKEN }}
+      SOURCE: ${{ matrix.source }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+      - run: pip install ./pipeline
+      - run: itn ingest "$SOURCE"
