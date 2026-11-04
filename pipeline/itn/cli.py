@@ -29,7 +29,8 @@ def cmd_ingest(args) -> None:
         "scotus-bulk": lambda conn: cap_scotus.run(
             conn, r2=r2, fetch_text=not args.no_text, max_minutes=args.max_minutes),
         "scotus-gov": lambda conn: supremecourt_gov.run(
-            conn, r2=r2, fetch_text=not args.no_text, max_minutes=args.max_minutes),
+            conn, r2=r2, since_term=args.since_term, fetch_text=not args.no_text,
+            max_minutes=args.max_minutes),
         "scotus": lambda conn: courtlistener_scotus.run(
             conn, r2=r2, since=args.since_date, fetch_text=not args.no_text,
             max_minutes=args.max_minutes),
@@ -67,6 +68,7 @@ def main(argv=None) -> None:
     ing.add_argument("sources", nargs="*", choices=["federal-register", "congress-laws", "scotus-bulk", "scotus-gov", "scotus"])
     ing.add_argument("--since", type=int, help="Federal Register: first year to (re)ingest")
     ing.add_argument("--since-congress", type=int, help="Congress.gov: first Congress to (re)ingest")
+    ing.add_argument("--since-term", type=int, help="supremecourt.gov: first October Term to (re)ingest")
     ing.add_argument("--since-date", help="Supreme Court: first filing date to (re)ingest, YYYY-MM-DD")
     ing.add_argument("--max-minutes", type=float, default=95,
                      help="Congress.gov and Supreme Court: stop cleanly after this long; the next run resumes")

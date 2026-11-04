@@ -11,6 +11,12 @@ on:
       since_congress:
         description: "First Congress to (re)ingest laws from; blank resumes from the saved cursor"
         required: false
+      sources:
+        description: "Sources to run, space separated (e.g. scotus-gov); blank runs all"
+        required: false
+      since_term:
+        description: "First October Term to (re)ingest from supremecourt.gov, e.g. 2014"
+        required: false
       since_date:
         description: "First Supreme Court filing date to (re)ingest, YYYY-MM-DD; blank resumes from the saved cursor"
         required: false
@@ -39,8 +45,11 @@ jobs:
           cache-dependency-path: pipeline/pyproject.toml
       - run: pip install ./pipeline
       - run: itn migrate
-      - run: >-
-          itn ingest
+      - env:
+          SOURCES: ${{ inputs.sources }}
+        run: >-
+          itn ingest $SOURCES
           ${{ inputs.since && format('--since {0}', inputs.since) || '' }}
+          ${{ inputs.since_term && format('--since-term {0}', inputs.since_term) || '' }}
           ${{ inputs.since_congress && format('--since-congress {0}', inputs.since_congress) || '' }}
           ${{ inputs.since_date && format('--since-date {0}', inputs.since_date) || '' }}

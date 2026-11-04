@@ -1,7 +1,8 @@
 import datetime as dt
 
 from itn.ingest.supremecourt_gov import (
-    author_of, docket_summary, kind_of, parse_term_table, split_opinions, term_of, to_artifact,
+    author_of, docket_summary, kind_of, parse_term_table, print_pages, print_ranges, split_opinions,
+    term_of, to_artifact,
 )
 
 TABLE = """
@@ -59,3 +60,44 @@ def test_to_artifact_keys_by_docket():
     assert a["id"] == "scotus/docket-22-506"
     assert a["metadata"]["docket"]["lower_court"] == "8th Cir."
     assert a["official_summary"] == "Held: ..."
+
+
+OLD_TABLE = """<table><tr>
+<td style="text-align: center;">76</td><td style="text-align: center;">6/28/18</td>
+<td style="text-align: center; white-space: nowrap;">17-1364</td>
+<td><a href='/opinions/preliminaryprint/585US2PP_final.pdf#page=474' target='_blank' title="x">North Carolina v. Covington</a></td>
+<td style="text-align: center;">PC</td><td style="text-align: center;"><span>585 U.S. 969</span></td></tr>
+<tr><td>1</td><td>10/14/2026</td><td>26A476</td>
+<td><a href='/opinions/26pdf/26a476_k537.pdf' target='_blank'>FCC v. Brown</a></td><td>PC</td><td></td></tr>
+<tr><td>2</td><td>Links</td><td><a href='../../publicinfo/PIOServices.pdf'>x</a></td><td></td></tr>
+</table>"""
+
+
+def test_parse_preliminary_print_rows_and_four_digit_years():
+    old, new = parse_term_table(OLD_TABLE, "https://www.supremecourt.gov/opinions/slipopinion/17")
+    assert old["pdf"] == "https://www.supremecourt.gov/opinions/preliminaryprint/585US2PP_final.pdf"
+    assert old["page"] == 474 and old["us_cite"] == ("585", "969")
+    assert old["date"] == "2018-06-28"
+    assert new["date"] == "2026-10-14" and "page" not in new
+    a = to_artifact(old, None, None)
+    assert a["id"] == "scotus/585-us-969"
+    assert a["sources"][0]["url"].endswith("585US2PP_final.pdf#page=474")
+
+
+def test_print_ranges_and_pages():
+    rows = [{"pdf": "p", "page": 10}, {"pdf": "p", "page": 3}, {"pdf": "q", "page": 5},
+            {"pdf": "r"}]
+    assert print_ranges(rows) == {("p", 3): 10, ("p", 10): None, ("q", 5): None}
+
+    class Page:
+        def __init__(self, t):
+            self.t = t
+
+        def extract_text(self):
+            return self.t
+
+    class Reader:
+        pages = [Page(f"page {n}") for n in range(1, 8)] + [Page("ORDERS FROM JUNE 2018\n...")]
+
+    assert print_pages(Reader, 3, 6) == ["page 3", "page 4", "page 5"]
+    assert print_pages(Reader, 6, None) == ["page 6", "page 7"]

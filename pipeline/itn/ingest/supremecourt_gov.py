@@ -5,6 +5,11 @@ Each term has a slip opinion table linking one PDF per case. The PDF holds the
 syllabus and every opinion; its running page headers ("Opinion of the Court",
 "THOMAS, J., dissenting") say which opinion each page belongs to, so the text is
 split on them. Cases are keyed by docket number until a U.S. Reports page exists.
+
+For October Terms 2017-2019 the table links each case to a page of a preliminary
+print (one PDF per part of a U.S. Reports volume) and gives its citation. Those
+cases are cut from the print, ending where the next listed case in it begins, and
+are keyed by citation. Terms 2014-2016 have no table and are left to CourtListener.
 """
 
 import datetime as dt
@@ -27,8 +32,9 @@ DELAY_SECONDS = 1.0
 
 _ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S | re.I)
 _CELL = re.compile(r"<td[^>]*>(.*?)</td>", re.S | re.I)
-_PDF = re.compile(r"""href=["']([^"']*\d\dpdf/[^"']+\.pdf)["']""", re.I)
-_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2})$")
+_PDF = re.compile(r"""href=["']([^"'#]*/opinions/[^"'#]+\.pdf)(?:#page=(\d+))?["']""", re.I)
+_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})$")
+_US_CITE = re.compile(r"^(\d+) U\. ?S\. (\d+)$")
 
 # Running headers that name the opinion a page belongs to.
 _LABEL = re.compile(
@@ -59,9 +65,15 @@ def parse_term_table(page: str, base: str = f"{SITE}/opinions/slipopinion/") -> 
         m, d, y = (int(x) for x in _DATE.match(date).groups())
         i = cells.index(docket)
         url = urljoin(base, pdf.group(1))
-        rows.append({"date": dt.date(2000 + y, m, d).isoformat(), "docket": docket,
-                     "name": cells[i + 1] if i + 1 < len(cells) else docket,
-                     "pdf": url})
+        row = {"date": dt.date(y if y >= 100 else 2000 + y, m, d).isoformat(), "docket": docket,
+               "name": cells[i + 1] if i + 1 < len(cells) else docket,
+               "pdf": url}
+        if pdf.group(2):
+            row["page"] = int(pdf.group(2))
+        cite = next((_US_CITE.match(c) for c in cells if _US_CITE.match(c)), None)
+        if cite:
+            row["us_cite"] = (cite.group(1), cite.group(2))
+        rows.append(row)
     return rows
 
 
@@ -123,8 +135,41 @@ def pdf_pages(data: bytes) -> list[str]:
     return [p.extract_text() or "" for p in PdfReader(io.BytesIO(data)).pages]
 
 
+def print_ranges(rows: list[dict]) -> dict[tuple[str, int], int | None]:
+    """(pdf, first page) -> first page of the next case in the same print, or None
+    for the last case listed in it."""
+    starts: dict[str, set[int]] = {}
+    for r in rows:
+        if r.get("page"):
+            starts.setdefault(r["pdf"], set()).add(r["page"])
+    out = {}
+    for pdf, pages in starts.items():
+        ordered = sorted(pages)
+        for a, b in zip(ordered, ordered[1:] + [None]):
+            out[(pdf, a)] = b
+    return out
+
+
+# A preliminary print can end with orders, a table of cases, or an index.
+_PRINT_TAIL = re.compile(r"^(ORDERS FROM|INDEX|TABLE OF CASES|REPORTER'S NOTE)", re.M)
+MAX_CASE_PAGES = 150
+
+
+def print_pages(reader, start: int, end: int | None) -> list[str]:
+    """Text of one case in a preliminary print; pages are 1-based like #page=N."""
+    stop = min(end - 1 if end else start + MAX_CASE_PAGES - 1, len(reader.pages))
+    pages = []
+    for n in range(start, stop + 1):
+        text = reader.pages[n - 1].extract_text() or ""
+        if pages and end is None and _PRINT_TAIL.search("\n".join(text.splitlines()[:6])):
+            break
+        pages.append(text)
+    return pages
+
+
 def to_artifact(row: dict, syllabus: str | None, docket: dict | None) -> dict:
-    aid = ids.scotus_docket(row["docket"])
+    cite = row.get("us_cite")
+    aid = ids.scotus_case(*cite) if cite else ids.scotus_docket(row["docket"])
     return {
         "id": aid,
         "type": "scotus_case",
@@ -134,7 +179,8 @@ def to_artifact(row: dict, syllabus: str | None, docket: dict | None) -> dict:
         "in_scope": True,
         "closure_depth": 0,
         "sources": [
-            {"label": "Supreme Court opinion (PDF)", "url": row["pdf"]},
+            {"label": "Supreme Court opinion (PDF)",
+             "url": row["pdf"] + (f"#page={row['page']}" if row.get("page") else "")},
             {"label": "Supreme Court docket",
              "url": f"{SITE}/search.aspx?filename=/docket/docketfiles/html/public/{row['docket']}.html"},
         ],
@@ -143,7 +189,8 @@ def to_artifact(row: dict, syllabus: str | None, docket: dict | None) -> dict:
         "text_sha256": None,
         "metadata": {
             "docket_number": row["docket"],
-            "slip_opinion_pdf": row["pdf"],
+            "slip_opinion_pdf": row["pdf"] + (f"#page={row['page']}" if row.get("page") else ""),
+            "us_cite": f"{cite[0]} U.S. {cite[1]}" if cite else None,
             "source": "supremecourt.gov",
             **({"docket": docket} if docket else {}),
         },
@@ -164,23 +211,37 @@ def docket_summary(data: dict) -> dict:
     }
 
 
-def already_loaded(conn, docket: str) -> bool:
-    """True if this case came in from CAP or CourtListener under its U.S. Reports id."""
+def already_loaded(conn, docket: str, cite: tuple[str, str] | None = None) -> bool:
+    """True if this case came in already, from here, CAP, or CourtListener."""
+    cite_id = ids.scotus_case(*cite) if cite else None
     row = conn.execute(
         "SELECT 1 FROM artifact WHERE type = 'scotus_case' AND metadata ? 'opinions'"
-        " AND (id = %s OR regexp_replace(metadata->>'docket_number', '^No\\.?\\s*', '') = %s)",
-        (ids.scotus_docket(docket), docket)).fetchone()
+        " AND (id = %s OR id = %s"
+        " OR regexp_replace(metadata->>'docket_number', '^No\\.?\\s*', '') = %s)",
+        (ids.scotus_docket(docket), cite_id, docket)).fetchone()
     conn.commit()
     return bool(row)
 
 
-def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) -> int:
+def describe_unparsed(page: str) -> str:
+    """A short sample of a page whose table didn't parse, for fixing the parser."""
+    pdf_rows = [r for r in _ROW.findall(page) if ".pdf" in r.lower()]
+    hrefs = re.findall(r"""href=["']([^"']+\.pdf)["']""", page, re.I)[:3]
+    sample = re.sub(r"\s+", " ", pdf_rows[0])[:600] if pdf_rows else re.sub(r"\s+", " ", page[:600])
+    return f"{len(pdf_rows)} table rows with PDFs; hrefs {hrefs}; sample: {sample}"
+
+
+def run(conn, r2=None, since_term: int | None = None, fetch_text: bool = True,
+        max_minutes: float = 95, **_) -> int:
     deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
     current = term_of(dt.date.today())
-    start = cursor.get("next_term_v2", FIRST_TERM)
+    start = since_term or cursor.get("next_term_v2", FIRST_TERM)
     count = 0
-    with http.client(timeout=180) as client:
+    with http.client(timeout=300) as client:
+        # Read every term's table first: a case cut from a preliminary print ends
+        # where the next case in that print begins, which may be listed in another term.
+        tables: dict[int, list[dict]] = {}
         for term in range(start, current + 1):
             resp = get(client, f"{SITE}/opinions/slipopinion/{term % 100:02d}")
             if resp.is_error:
@@ -189,21 +250,36 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
             rows = parse_term_table(resp.text, str(resp.url))
             print(f"Term {term}: {len(rows)} opinions listed", flush=True)
             if not rows:
-                # The Court keeps slip opinion lists only for recent terms; older ones
-                # redirect to the bound volumes page. CourtListener covers those terms.
-                print(f"Term {term}: no slip opinion list (got {resp.url})", flush=True)
-                continue
+                # The Court keeps slip opinion lists only from October Term 2017; older
+                # ones redirect to the bound volumes page. CourtListener covers those.
+                print(f"Term {term}: no slip opinion list (got {resp.url}); "
+                      f"{describe_unparsed(resp.text)}", flush=True)
+            tables[term] = rows
+        ranges = print_ranges([r for rows in tables.values() for r in rows])
+        prints: dict[str, PdfReader] = {}
+        for term, rows in tables.items():
             for row in rows:
                 if time.monotonic() > deadline:
                     print(f"Time budget reached in term {term}; resuming next run", flush=True)
                     return count
-                if already_loaded(conn, row["docket"]):
+                if already_loaded(conn, row["docket"], row.get("us_cite")):
                     continue
                 try:
-                    time.sleep(DELAY_SECONDS)
-                    pdf = get(client, row["pdf"])
-                    pdf.raise_for_status()
-                    syllabus, parts = split_opinions(pdf_pages(pdf.content))
+                    if row.get("page"):
+                        if row["pdf"] not in prints:
+                            time.sleep(DELAY_SECONDS)
+                            pdf = get(client, row["pdf"])
+                            pdf.raise_for_status()
+                            prints.clear()  # one print in memory at a time
+                            prints[row["pdf"]] = PdfReader(io.BytesIO(pdf.content))
+                        pages = print_pages(prints[row["pdf"]], row["page"],
+                                            ranges.get((row["pdf"], row["page"])))
+                    else:
+                        time.sleep(DELAY_SECONDS)
+                        pdf = get(client, row["pdf"])
+                        pdf.raise_for_status()
+                        pages = pdf_pages(pdf.content)
+                    syllabus, parts = split_opinions(pages)
                     time.sleep(DELAY_SECONDS)
                     dresp = get(client, f"{SITE}/RSS/Cases/JSON/{row['docket']}.json")
                     docket = docket_summary(dresp.json()) if dresp.is_success else None
@@ -213,6 +289,9 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
                 artifact = to_artifact(row, syllabus, docket)
                 aid = artifact["id"]
                 artifact["metadata"]["opinions"] = len(parts)
+                if not parts:
+                    print(f"Skipping {row['docket']}: no opinion text found", flush=True)
+                    continue
                 db.upsert_artifact(conn, artifact)
                 for i, (label, text) in enumerate(parts):
                     kind = kind_of(label)
