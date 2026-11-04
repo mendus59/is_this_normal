@@ -22,8 +22,12 @@ def test_volume_pdfs():
 
 def test_page_numbers_and_offset():
     assert page_number("644 OCTOBER TERM, 2014\nSyllabus") == 644
+    assert page_number("OCTOBER TERM, 2014 383 \nSyllabus") == 383
+    assert page_number("427OCTOBER TERM,\n2018\nSyllabus") == 427
+    assert page_number("86 \n OCTOBER TERM, 2014 \nSyllabus") == 86
+    assert page_number("CASES ADJUDGED \nIN THE \nSUPREME COURT") == 1
     assert page_number("Cite as: 576 U. S. 644 (2015) 645\nOpinion of the Court") == 645
-    assert page_number("OBERGEFELL v. HODGES\n\nno number here") is None
+    assert page_number("OBERGEFELL v. HODGES\n\nno number here 12") is None
     numbers = [None, None] + list(range(1, 40))
     assert page_offset(numbers) == 2
     assert page_offset([None] * 30) is None

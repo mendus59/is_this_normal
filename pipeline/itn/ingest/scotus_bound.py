@@ -65,16 +65,22 @@ def volume_pdfs(page: str, base: str = VOLUMES_PAGE) -> dict[str, list[str]]:
     return out
 
 
+_HEAD_NUMBER = re.compile(
+    r"(\d{1,4})\s*OCTOBER\s+TERM,?\s*\d{4}|OCTOBER\s+TERM,?\s*\d{4}\s+(\d{1,4})\b"
+    r"|Cite as: \d+ U\. ?S\. \d+ \(\d{4}\)\s+(\d{1,4})\b")
+
+
 def page_number(text: str) -> int | None:
-    """The printed U.S. Reports page number from a page's running head."""
-    for line in text.splitlines()[:3]:
-        line = line.strip()
-        if line.startswith("Cite as:"):
-            line = re.sub(r"Cite as: \d+ U\. ?S\. \d+ \(\d{4}\)", " ", line)
-        m = _PAGE_NUMBER.search(line)
-        if m:
-            return int(m.group(1))
-    return None
+    """The printed U.S. Reports page number from a page's running head, which reads
+    "644 OCTOBER TERM, 2014" or "OCTOBER TERM, 2014 383". A volume's first case opens
+    on page 1 under "CASES ADJUDGED"."""
+    head = " ".join(text.splitlines()[:3])
+    if "CASES ADJUDGED" in head:
+        return 1
+    m = _HEAD_NUMBER.search(head)
+    if not m:
+        return None
+    return int(next(g for g in m.groups() if g))
 
 
 def page_offset(numbers: list[int | None]) -> int | None:
@@ -109,7 +115,8 @@ def case_start(text: str) -> dict | None:
 def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -> int:
     deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
-    done = set(cursor.get("done_pdfs", []))
+    # v2: page numbers were read from the wrong part of the running head before.
+    done = set(cursor.get("done_pdfs_v2", []))
     count = 0
     with http.client(timeout=600) as client:
         names: dict[str, dict] = {}
@@ -146,8 +153,9 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                 for k, (i, case) in enumerate(starts):
                     if not GAP[0] <= case["date"] < GAP[1]:
                         continue
-                    page = (i + 1 - offset) if offset is not None else page_number(texts[i])
+                    page = page_number(texts[i]) or ((i + 1 - offset) if offset is not None else None)
                     cite = (vol, str(page)) if page and page > 0 else None
+                    drop_misfiled(conn, case["docket"], ids.scotus_case(*cite) if cite else None)
                     if sc.already_loaded(conn, case["docket"], cite):
                         continue
                     end = starts[k + 1][0] if k + 1 < len(starts) else len(texts)
@@ -167,9 +175,24 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                 if not starts:
                     print(f"  sample page: {texts[min(30, len(texts) - 1)][:300]!r}", flush=True)
                 done.add(url)
-                db.set_cursor(conn, SOURCE, {"done_pdfs": sorted(done)})
+                db.set_cursor(conn, SOURCE, {"done_pdfs_v2": sorted(done)})
                 conn.commit()
     return count
+
+
+def drop_misfiled(conn, docket: str, right_id: str | None) -> None:
+    """Remove this source's copies of a case filed under a wrong citation by earlier runs."""
+    cur = conn.execute(
+        "DELETE FROM artifact WHERE metadata->>'source' = %s AND metadata->>'docket_number' = %s"
+        " AND id IS DISTINCT FROM %s RETURNING id",
+        (BOUND_SOURCE, docket, right_id))
+    gone = [r[0] for r in cur.fetchall()]
+    conn.commit()
+    if gone:
+        print(f"Removed {docket} filed as {gone}; refiling as {right_id}", flush=True)
+
+
+BOUND_SOURCE = "supremecourt.gov U.S. Reports"
 
 
 def load(conn, r2, fetch_text: bool, row: dict, syllabus, parts):
@@ -177,7 +200,7 @@ def load(conn, r2, fetch_text: bool, row: dict, syllabus, parts):
     aid = artifact["id"]
     artifact["metadata"]["opinions"] = len(parts)
     artifact["metadata"]["oyez"] = row.get("oyez")
-    artifact["metadata"]["source"] = "supremecourt.gov U.S. Reports"
+    artifact["metadata"]["source"] = BOUND_SOURCE
     db.upsert_artifact(conn, artifact)
     for i, (label, text) in enumerate(parts):
         kind = sc.kind_of(label)
