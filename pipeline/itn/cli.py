@@ -33,7 +33,7 @@ def cmd_ingest(args) -> None:
             max_minutes=args.max_minutes),
         "scotus": lambda conn: courtlistener_scotus.run(
             conn, r2=r2, since=args.since_date, fetch_text=not args.no_text,
-            max_minutes=args.max_minutes),
+            max_minutes=args.scotus_minutes),
     }
     with db.connect() as conn:
         for name in args.sources or list(runners):
@@ -70,6 +70,8 @@ def main(argv=None) -> None:
     ing.add_argument("--since-congress", type=int, help="Congress.gov: first Congress to (re)ingest")
     ing.add_argument("--since-term", type=int, help="supremecourt.gov: first October Term to (re)ingest")
     ing.add_argument("--since-date", help="Supreme Court: first filing date to (re)ingest, YYYY-MM-DD")
+    ing.add_argument("--scotus-minutes", type=float, default=170,
+                     help="CourtListener: time budget, long enough to wait out two hourly limits")
     ing.add_argument("--max-minutes", type=float, default=95,
                      help="Congress.gov and Supreme Court: stop cleanly after this long; the next run resumes")
     ing.add_argument("--no-text", action="store_true", help="metadata only, skip R2 uploads")

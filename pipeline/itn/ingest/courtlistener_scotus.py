@@ -2,9 +2,10 @@
 (majority, concurrences, dissents) stored separately and its citations extracted.
 https://www.courtlistener.com/help/api/rest/ (token in env COURTLISTENER_TOKEN)
 
-CourtListener allows 5,000 requests an hour, so calls are paced and each case is
-committed as soon as it is complete. A run that stops part way resumes from the
-filing date it reached, and cases already loaded are skipped.
+Free accounts get 5 requests a minute, 50 an hour and 125 a day (since May 2026), so
+calls are paced at the per-minute rate, a run waits out the hourly limit while it has
+time left, and it stops at the daily limit. Each case is committed as soon as it is
+complete; a run resumes from the filing date it reached and skips cases already loaded.
 """
 
 import logging
@@ -21,10 +22,12 @@ from itn.http import get
 API = "https://www.courtlistener.com/api/rest/v4"
 SITE = "https://www.courtlistener.com"
 SOURCE = "courtlistener_scotus"
-# Stay under 5,000 requests per hour.
-API_DELAY_SECONDS = 0.8
-# Waits longer than this mean the hourly quota is spent; stop and resume next run.
+# Stay under 5 requests a minute.
+API_DELAY_SECONDS = 12.5
+# Short waits are the per-minute limit and are retried in place.
 MAX_RATE_WAIT_SECONDS = 180
+# The hourly limit is waited out when the run has time for it; the daily one is not.
+MAX_HOURLY_WAIT_SECONDS = 3700
 
 # eyecite logs a warning for every ambiguous short citation; they are harmless here.
 logging.getLogger("eyecite").setLevel(logging.ERROR)
@@ -151,17 +154,35 @@ def to_components(aid: str, opinions: list[dict]) -> list[tuple[dict, str]]:
     return out
 
 
+def hourly_wait(resp, deadline: float | None, now: float) -> int | None:
+    """Seconds to wait out an hourly-limit 429, or None if this run should stop."""
+    retry_after = resp.headers.get("Retry-After", "")
+    if "/hour" not in resp.text or not retry_after.isdigit():
+        return None
+    wait = int(retry_after) + 5
+    if wait > MAX_HOURLY_WAIT_SECONDS or (deadline is not None and now + wait > deadline):
+        return None
+    return wait
+
+
 class CourtListener:
-    def __init__(self, client, token: str):
+    def __init__(self, client, token: str, deadline: float | None = None):
         self.client = client
+        self.deadline = deadline
         client.headers["Authorization"] = f"Token {token}"
 
     def get(self, url: str, params=None) -> dict:
-        time.sleep(API_DELAY_SECONDS)
         url = url if url.startswith("http") else f"{API}{url}"
-        resp = get(self.client, url, params=params, max_wait=MAX_RATE_WAIT_SECONDS)
-        if resp.status_code == 429:
-            raise RateLimited(f"Retry-After {resp.headers.get('Retry-After', '?')}s: {resp.text[:300]}")
+        while True:
+            time.sleep(API_DELAY_SECONDS)
+            resp = get(self.client, url, params=params, max_wait=MAX_RATE_WAIT_SECONDS)
+            if resp.status_code != 429:
+                break
+            wait = hourly_wait(resp, self.deadline, time.monotonic())
+            if wait is None:
+                raise RateLimited(f"Retry-After {resp.headers.get('Retry-After', '?')}s: {resp.text[:300]}")
+            print(f"CourtListener hourly limit; waiting {wait}s", flush=True)
+            time.sleep(wait)
         if resp.is_error:
             raise RuntimeError(f"CourtListener returned {resp.status_code} for {url}: {resp.text[:500]}")
         return resp.json()
@@ -184,7 +205,7 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
     start = since or cursor.get("next_date") or SCOPE_START
     count = skipped = 0
     with http.client() as client:
-        cl = CourtListener(client, token)
+        cl = CourtListener(client, token, deadline)
         params = {"type": "o", "court": "scotus", "filed_after": start,
                   "order_by": "dateFiled asc"}
         try:
