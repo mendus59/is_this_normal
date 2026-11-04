@@ -174,11 +174,20 @@ def already_loaded(conn, docket: str) -> bool:
     return bool(row)
 
 
-def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) -> int:
+def describe_unparsed(page: str) -> str:
+    """A short sample of a page whose table didn't parse, for fixing the parser."""
+    pdf_rows = [r for r in _ROW.findall(page) if ".pdf" in r.lower()]
+    hrefs = re.findall(r"""href=["']([^"']+\.pdf)["']""", page, re.I)[:3]
+    sample = re.sub(r"\s+", " ", pdf_rows[0])[:600] if pdf_rows else re.sub(r"\s+", " ", page[:600])
+    return f"{len(pdf_rows)} table rows with PDFs; hrefs {hrefs}; sample: {sample}"
+
+
+def run(conn, r2=None, since_term: int | None = None, fetch_text: bool = True,
+        max_minutes: float = 95, **_) -> int:
     deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
     current = term_of(dt.date.today())
-    start = cursor.get("next_term_v2", FIRST_TERM)
+    start = since_term or cursor.get("next_term_v2", FIRST_TERM)
     count = 0
     with http.client(timeout=180) as client:
         for term in range(start, current + 1):
@@ -191,7 +200,8 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 95, **_) ->
             if not rows:
                 # The Court keeps slip opinion lists only for recent terms; older ones
                 # redirect to the bound volumes page. CourtListener covers those terms.
-                print(f"Term {term}: no slip opinion list (got {resp.url})", flush=True)
+                print(f"Term {term}: no slip opinion list (got {resp.url}); "
+                      f"{describe_unparsed(resp.text)}", flush=True)
                 continue
             for row in rows:
                 if time.monotonic() > deadline:
