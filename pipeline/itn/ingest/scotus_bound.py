@@ -126,7 +126,11 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
         pdfs = volume_pdfs(resp.text, str(resp.url))
         for vol in sorted(v for v in pdfs if FIRST_VOLUME <= int(v) <= LAST_VOLUME):
             for url in pdfs[vol]:
-                if url in done:
+                import os
+                check = os.environ.get("ITN_BOUND_CHECK")
+                if check and vol not in check.split(","):
+                    continue
+                if url in done and not check:
                     continue
                 if time.monotonic() > deadline:
                     print(f"Time budget reached at volume {vol}; resuming next run", flush=True)
@@ -143,6 +147,12 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                 offset = page_offset([page_number(t) for t in texts])
                 starts = [(i, c) for i, t in enumerate(texts) if (c := case_start(t))]
                 n = 0
+                if check:
+                    for i, case in starts:
+                        print(vol, case["docket"], "caption#", page_number(texts[i]), "offset#",
+                              (i + 1 - offset) if offset is not None else None,
+                              repr(texts[i][:90]), flush=True)
+                    continue
                 for k, (i, case) in enumerate(starts):
                     if not GAP[0] <= case["date"] < GAP[1]:
                         continue

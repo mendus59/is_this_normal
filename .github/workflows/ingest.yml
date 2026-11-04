@@ -47,6 +47,7 @@ jobs:
       - run: itn migrate
       - env:
           SOURCES: ${{ inputs.sources }}
+          ITN_BOUND_CHECK: "574,576,580,588,589"
         run: >-
           itn ingest $SOURCES
           ${{ inputs.since && format('--since {0}', inputs.since) || '' }}
