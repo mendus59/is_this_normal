@@ -77,3 +77,14 @@ def test_build_details_links_opinions_and_citations():
     assert o["opinions"][0]["text"] == "text/scotus/576-us-644/0-majority.txt"
     assert [c["title"] for c in o["cites"]] == ["Griswold v. Connecticut", None]
     assert d["scotus/381-us-479"]["cited_by"] == [{"id": "scotus/576-us-644", "title": "Obergefell v. Hodges"}]
+
+
+def test_changed_details_skips_known_hashes():
+    from itn.publish.export import changed_details
+    details = {"a": {"id": "a"}, "b": {"id": "b"}}
+    first = changed_details(details, {})
+    assert set(first) == {"a", "b"}
+    known = {aid: digest for aid, (_, digest) in first.items()}
+    assert changed_details(details, known) == {}
+    details["b"]["title"] = "new"
+    assert set(changed_details(details, known)) == {"b"}

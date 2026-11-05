@@ -6,7 +6,9 @@ at an older prefix.
 """
 
 import datetime as dt
+import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from bisect import bisect_right
 
 from itn.storage import R2
@@ -95,12 +97,42 @@ def detail_key(artifact_id: str) -> str:
     return f"a/{artifact_id}.json"
 
 
-def write_details(conn, r2: R2) -> int:
-    """Reader files live at stable keys and are only re-uploaded when they change."""
-    details = build_details(conn)
+DETAIL_HASHES = "a/_hashes.json"
+UPLOAD_WORKERS = 24
+
+
+def changed_details(details: dict[str, dict], known: dict[str, str]) -> dict[str, tuple[bytes, str]]:
+    """Reader files whose content differs from the hash recorded at their last upload."""
+    out = {}
     for aid, d in details.items():
-        r2.put_text(detail_key(aid), json.dumps(d, separators=(",", ":"), default=str),
-                    content_type="application/json")
+        body = json.dumps(d, separators=(",", ":"), default=str).encode("utf-8")
+        digest = hashlib.sha256(body).hexdigest()
+        if known.get(aid) != digest:
+            out[aid] = (body, digest)
+    return out
+
+
+def write_details(conn, r2: R2) -> int:
+    """Reader files live at stable keys. One index of their hashes means only changed
+    files are uploaded, without a request per unchanged file."""
+    details = build_details(conn)
+    known = r2.get_json(DETAIL_HASHES) or {}
+    todo = list(changed_details(details, known).items())
+    print(f"Reader files: {len(details)}, {len(todo)} changed", flush=True)
+    batch = 2000
+    with ThreadPoolExecutor(UPLOAD_WORKERS) as pool:
+        for start in range(0, len(todo), batch):
+            chunk = todo[start:start + batch]
+            list(pool.map(lambda item: r2.put_bytes(detail_key(item[0]), item[1][0],
+                                                    "application/json", item[1][1]), chunk))
+            known.update({aid: digest for aid, (_, digest) in chunk})
+            r2.put_json(DETAIL_HASHES, known, cache_control="no-store")
+            print(f"  uploaded {start + len(chunk)} of {len(todo)}", flush=True)
+    stale = set(known) - set(details)
+    if stale:
+        for aid in stale:
+            known.pop(aid)
+        r2.put_json(DETAIL_HASHES, known, cache_control="no-store")
     return len(details)
 
 
@@ -109,8 +141,7 @@ def run(conn, r2: R2 | None = None) -> str:
     version = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H%M%SZ")
     prefix = f"v/{version}"
     catalog = build_catalog(conn)
-    readers = write_details(conn, r2)
-    print(f"Reader files: {readers}", flush=True)
+    write_details(conn, r2)
     r2.put_json(f"{prefix}/catalog.json", catalog)
     r2.put_json(
         "manifest.json",

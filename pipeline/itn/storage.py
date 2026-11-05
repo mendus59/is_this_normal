@@ -4,6 +4,7 @@ import hashlib
 import json
 
 import boto3
+from botocore.config import Config
 
 from itn.config import R2Settings
 
@@ -46,3 +47,15 @@ class R2:
             ContentType="application/json",
             CacheControl=cache_control,
         )
+
+    def get_json(self, key: str):
+        """The JSON stored at key, or None when there is none."""
+        try:
+            obj = self.client.get_object(Bucket=self.settings.bucket, Key=key)
+        except self.client.exceptions.ClientError:
+            return None
+        return json.loads(obj["Body"].read())
+
+    def put_bytes(self, key: str, body: bytes, content_type: str, digest: str) -> None:
+        self.client.put_object(Bucket=self.settings.bucket, Key=key, Body=body,
+                               ContentType=content_type, Metadata={"sha256": digest})
