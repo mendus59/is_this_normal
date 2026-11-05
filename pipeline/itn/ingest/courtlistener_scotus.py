@@ -19,6 +19,7 @@ from itn import db, http, ids
 from itn.config import SCOPE_START, require
 from itn.extract import citations
 from itn.http import get
+from itn.ingest import supremecourt_gov
 
 API = "https://www.courtlistener.com/api/rest/v4"
 SITE = "https://www.courtlistener.com"
@@ -234,6 +235,8 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
                 if time.monotonic() > deadline:
                     print(f"Time budget reached at {cluster.get('date_filed')}; resuming next run", flush=True)
                     break
+                if us_cite(cluster) and cluster["docket_number"]:
+                    supremecourt_gov.claim_cite(conn, cluster["docket_number"], us_cite(cluster))
                 # Skip cases already loaded from here, CAP, or supremecourt.gov.
                 aid_guess = artifact_id(cluster, cluster["docket_number"])
                 done = conn.execute(
