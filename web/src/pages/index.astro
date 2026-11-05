@@ -55,8 +55,9 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     const date = document.createElement("span");
     date.textContent = a.date ?? "";
     meta.append(id, kind, date);
-    const title = document.createElement("div");
+    const title = document.createElement("a");
     title.className = "row-title"; title.textContent = a.title;
+    title.href = `${trendBase.replace(/trends\/$/, "")}read/?id=${encodeURIComponent(a.id)}`;
     const band = document.createElement("span");
     band.className = `band band-${a.bandKey}`;
     band.textContent = a.band ? `${bandLabel(a.band)} · ${a.percentile}` : "not yet analyzed";
@@ -120,7 +121,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
   .list :global(li) { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; overflow-wrap: anywhere; }
   .list :global(.row-meta) { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--ink-soft); }
-  .list :global(.row-title) { font-weight: 600; margin: 4px 0 6px; }
+  .list :global(.row-title) { display: block; font-weight: 600; margin: 4px 0 6px; color: var(--ink); text-decoration: none; }
+  .list :global(.row-title:hover) { color: var(--accent); text-decoration: underline; }
   .list :global(.band) { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--accent-wash); color: var(--ink-soft); }
   .list :global(.band-routine), .list :global(.band-ordinary) { color: var(--ok); }
   .list :global(.band-novel) { color: var(--warn); }

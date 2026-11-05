@@ -1,0 +1,145 @@
+---
+import Base from "../layouts/Base.astro";
+const dataBase = import.meta.env.PUBLIC_DATA_BASE_URL ?? "";
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+<Base title="Reader · IsThisNormal">
+  <p id="status" class="status">Loading…</p>
+  <article id="doc" hidden>
+    <p class="meta"><span id="d-id" class="mono"></span> <span id="d-date"></span></p>
+    <h1 id="d-title"></h1>
+    <p id="d-scope" class="note" hidden>Cited by the corpus. It is here to be read, not scored.</p>
+    <p id="d-sources" class="sources"></p>
+    <section id="d-summary" hidden><h2>Summary</h2><p class="summary"></p></section>
+    <section id="d-opinions" hidden>
+      <h2>Opinions</h2>
+      <div id="tabs" class="tabs" role="tablist"></div>
+      <div id="opinion" class="opinion"></div>
+    </section>
+    <section id="d-text" hidden><h2>Text</h2><div class="opinion"></div></section>
+    <section id="d-cites" hidden>
+      <h2>Cites <span class="count"></span></h2>
+      <ul class="cites"></ul>
+    </section>
+    <section id="d-cited-by" hidden>
+      <h2>Cited by <span class="count"></span></h2>
+      <ul class="cites"></ul>
+    </section>
+  </article>
+</Base>
+
+<script define:vars={{ dataBase, base }}>
+  const $ = (id) => document.getElementById(id);
+  const KIND = { majority: "Opinion of the Court", unanimous: "Opinion of the Court", plurality: "Plurality",
+    concurrence: "Concurrence", dissent: "Dissent", concurrence_in_part: "Concurring in part, dissenting in part",
+    opinion: "Opinion", other: "Opinion" };
+  const readerUrl = (id) => `${base}/read/?id=${encodeURIComponent(id)}`;
+  const textCache = new Map();
+
+  async function text(key) {
+    if (!textCache.has(key)) textCache.set(key, fetch(`${dataBase}/${key}`).then((r) => (r.ok ? r.text() : "")));
+    return textCache.get(key);
+  }
+
+  function paragraphs(el, body) {
+    el.replaceChildren(...body.split(/\n{2,}|\n(?=\s{2,})/).filter((p) => p.trim()).map((p) => {
+      const para = document.createElement("p");
+      para.textContent = p.replace(/\s*\n\s*/g, " ").trim();
+      return para;
+    }));
+  }
+
+  function citeList(section, items, label) {
+    if (!items.length) return;
+    section.hidden = false;
+    section.querySelector(".count").textContent = `(${items.length})`;
+    section.querySelector("ul").replaceChildren(...items.map((c) => {
+      const li = document.createElement("li");
+      const target = label(c);
+      if (c.title) {
+        const a = document.createElement("a");
+        a.href = readerUrl(target.id); a.textContent = c.title;
+        li.append(a, " ");
+      }
+      const span = document.createElement("span");
+      span.className = "mono"; span.textContent = target.text;
+      li.append(span);
+      return li;
+    }));
+  }
+
+  async function showOpinion(doc, i) {
+    const op = doc.opinions[i];
+    [...$("tabs").children].forEach((b, j) => b.setAttribute("aria-selected", String(i === j)));
+    const box = $("opinion");
+    box.textContent = "Loading text…";
+    const who = [op.author, op.joined_by?.length ? `joined by ${op.joined_by.join(", ")}` : ""].filter(Boolean).join(", ");
+    const body = op.text ? await text(op.text) : "";
+    const head = document.createElement("p");
+    head.className = "meta"; head.textContent = who;
+    const textEl = document.createElement("div");
+    if (body) paragraphs(textEl, body); else textEl.textContent = "Text not available yet; see the official source above.";
+    box.replaceChildren(head, textEl);
+  }
+
+  async function load() {
+    const id = new URLSearchParams(location.search).get("id");
+    if (!id) { $("status").textContent = "No document chosen. Pick one from Browse."; return; }
+    let doc;
+    try {
+      const r = await fetch(`${dataBase}/a/${id}.json`);
+      if (!r.ok) throw new Error(r.status);
+      doc = await r.json();
+    } catch {
+      $("status").textContent = `${id} isn't in the corpus yet.`;
+      return;
+    }
+    document.title = `${doc.title} · IsThisNormal`;
+    $("status").hidden = true;
+    $("doc").hidden = false;
+    $("d-id").textContent = doc.id;
+    $("d-date").textContent = doc.date ?? "";
+    $("d-title").textContent = doc.title;
+    $("d-scope").hidden = doc.in_scope;
+    $("d-sources").replaceChildren(...(doc.sources ?? []).flatMap((s, i) => {
+      const a = document.createElement("a");
+      a.href = s.url; a.textContent = s.label; a.rel = "noopener";
+      return i ? [" · ", a] : [a];
+    }));
+    if (doc.summary) { $("d-summary").hidden = false; paragraphs($("d-summary").querySelector(".summary"), doc.summary); }
+    if (doc.opinions.length) {
+      $("d-opinions").hidden = false;
+      $("tabs").replaceChildren(...doc.opinions.map((op, i) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.role = "tab";
+        b.textContent = `${KIND[op.kind] ?? op.kind}${op.author ? " · " + op.author : ""}`;
+        b.addEventListener("click", () => showOpinion(doc, i));
+        return b;
+      }));
+      showOpinion(doc, 0);
+    } else if (doc.text) {
+      $("d-text").hidden = false;
+      paragraphs($("d-text").querySelector(".opinion"), await text(doc.text));
+    }
+    const seen = new Set();
+    const cites = doc.cites.filter((c) => !seen.has(c.to) && seen.add(c.to));
+    citeList($("d-cites"), cites, (c) => ({ id: c.to, text: c.raw }));
+    citeList($("d-cited-by"), doc.cited_by, (c) => ({ id: c.id, text: c.id }));
+  }
+  load();
+</script>
+
+<style>
+  .status, .meta, .note { color: var(--ink-soft); font-size: 14px; }
+  .note { background: var(--accent-wash); padding: 8px 12px; border-radius: 6px; }
+  h1 { margin: 4px 0 8px; }
+  .sources { font-size: 14px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .tabs :global(button) { font: inherit; font-size: 14px; padding: 6px 12px; border: 1px solid var(--rule); border-radius: 999px; background: var(--sheet); color: var(--ink); cursor: pointer; }
+  .tabs :global(button[aria-selected="true"]) { background: var(--accent); border-color: var(--accent); color: var(--sheet); }
+  .opinion { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 20px; max-height: 75vh; overflow-y: auto; }
+  .opinion :global(p) { margin: 0 0 12px; max-width: 72ch; }
+  .cites { padding-left: 20px; font-size: 14px; }
+  .cites :global(li) { margin-bottom: 4px; overflow-wrap: anywhere; }
+  .count { color: var(--ink-soft); font-size: .7em; }
+</style>

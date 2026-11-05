@@ -143,3 +143,11 @@ def test_hourly_wait():
     assert hourly_wait(r(hourly, 2993), None, 0) == 2998
     assert hourly_wait(r(hourly, 2993), 1000, 0) is None  # run would end first
     assert hourly_wait(r(daily, 5747), None, 0) is None
+
+
+def test_full_date():
+    from itn.ingest.cited_scotus import full_date
+    assert full_date("1786-03") == "1786-03-01"
+    assert full_date("1801") == "1801-01-01"
+    assert full_date("1965-06-07") == "1965-06-07"
+    assert full_date(None) is None

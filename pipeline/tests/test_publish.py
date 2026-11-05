@@ -34,3 +34,46 @@ def test_r2_settings_lists_every_missing_name(monkeypatch):
         monkeypatch.delenv(n, raising=False)
     with pytest.raises(MissingSetting, match="R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY"):
         R2Settings.from_env()
+
+
+def test_build_details_links_opinions_and_citations():
+    from datetime import date
+
+    from itn.publish.export import build_details
+
+    class Cur:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def __iter__(self):
+            return iter(self.rows)
+
+        def fetchall(self):
+            return self.rows
+
+    class Conn:
+        def execute(self, sql, *_):
+            if "FROM artifact WHERE in_scope" in sql:
+                return Cur([("scotus/576-us-644", "scotus_case", "opinion", "Obergefell v. Hodges",
+                             date(2015, 6, 26), True, None, [], None),
+                            ("scotus/381-us-479", "scotus_case", "opinion", "Griswold v. Connecticut",
+                             date(1965, 6, 7), False, None, [], None)])
+            if "FROM component" in sql:
+                return Cur([("scotus/576-us-644#0-majority", "scotus/576-us-644", "majority", "Kennedy",
+                             [], "text/scotus/576-us-644/0-majority.txt")])
+            if "SELECT id, title FROM artifact" in sql:
+                return Cur([("scotus/576-us-644", "Obergefell v. Hodges"),
+                            ("scotus/381-us-479", "Griswold v. Connecticut")])
+            return Cur([("scotus/576-us-644#0-majority", "scotus/576-us-644", "scotus/381-us-479",
+                         "485", "381 U.S. 479"),
+                        ("scotus/576-us-644#0-majority", "scotus/576-us-644", "usc/42/1983", None,
+                         "42 U.S.C. § 1983")])
+
+        def commit(self):
+            pass
+
+    d = build_details(Conn())
+    o = d["scotus/576-us-644"]
+    assert o["opinions"][0]["text"] == "text/scotus/576-us-644/0-majority.txt"
+    assert [c["title"] for c in o["cites"]] == ["Griswold v. Connecticut", None]
+    assert d["scotus/381-us-479"]["cited_by"] == [{"id": "scotus/576-us-644", "title": "Obergefell v. Hodges"}]
