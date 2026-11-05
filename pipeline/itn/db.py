@@ -102,3 +102,36 @@ def replace_citations(conn: psycopg.Connection, component_id: str, extractor: st
             """,
             [{**c, "from_component": component_id, "extractor": extractor} for c in citations],
         )
+
+
+def rekey_artifact(conn: psycopg.Connection, old: str, new: str, metadata: dict | None = None) -> str:
+    """Move an artifact to a new id, with its components and their citations, in one
+    transaction. If `new` already exists, `old` is a duplicate and is dropped instead.
+    Stored text keys are kept as they are. Returns "moved", "dropped" or "missing"."""
+    with conn.transaction():
+        if not conn.execute("SELECT 1 FROM artifact WHERE id = %s", (old,)).fetchone():
+            return "missing"
+        if conn.execute("SELECT 1 FROM artifact WHERE id = %s", (new,)).fetchone():
+            conn.execute("DELETE FROM artifact WHERE id = %s", (old,))
+            return "dropped"
+        conn.execute(
+            """
+            INSERT INTO artifact (id, type, subtype, title, effective_date, in_scope, contentious,
+                                  closure_depth, sources, official_summary, text_key, text_sha256,
+                                  metadata, ingested_at)
+            SELECT %s, type, subtype, title, effective_date, in_scope, contentious, closure_depth,
+                   sources, official_summary, text_key, text_sha256,
+                   metadata || %s || jsonb_build_object('former_id', id), ingested_at
+            FROM artifact WHERE id = %s
+            """, (new, Jsonb(metadata or {}), old))
+        conn.execute(
+            """
+            INSERT INTO component (id, artifact_id, kind, author, joined_by, ord, text_key)
+            SELECT %s || substr(id, length(%s) + 1), %s, kind, author, joined_by, ord, text_key
+            FROM component WHERE artifact_id = %s
+            """, (new, old, new, old))
+        conn.execute(
+            "UPDATE citation SET from_component = %s || substr(from_component, length(%s) + 1)"
+            " WHERE from_component LIKE %s", (new, old, old.replace("_", r"\_") + "#%"))
+        conn.execute("DELETE FROM artifact WHERE id = %s", (old,))
+    return "moved"

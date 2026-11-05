@@ -156,6 +156,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                     page = page_number(texts[i]) or ((i + 1 - offset) if offset is not None else None)
                     cite = (vol, str(page)) if page and page > 0 else None
                     drop_misfiled(conn, case["docket"], ids.scotus_case(*cite) if cite else None)
+                    sc.claim_cite(conn, case["docket"], cite)
                     if sc.already_loaded(conn, case["docket"], cite):
                         continue
                     end = starts[k + 1][0] if k + 1 < len(starts) else len(texts)

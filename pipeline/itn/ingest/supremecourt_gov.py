@@ -211,6 +211,17 @@ def docket_summary(data: dict) -> dict:
     }
 
 
+def claim_cite(conn, docket: str, cite: tuple[str, str] | None) -> None:
+    """A case first loaded under its docket number moves to its U.S. Reports id once a
+    source shows the citation, so links to that citation reach it and it isn't listed twice."""
+    if not cite or not docket:
+        return
+    old, new = ids.scotus_docket(docket), ids.scotus_case(*cite)
+    result = db.rekey_artifact(conn, old, new, {"us_cite": f"{cite[0]} U.S. {cite[1]}"})
+    if result != "missing":
+        print(f"{old}: {result} -> {new}", flush=True)
+
+
 def already_loaded(conn, docket: str, cite: tuple[str, str] | None = None) -> bool:
     """True if this case came in already, from here, CAP, or CourtListener."""
     cite_id = ids.scotus_case(*cite) if cite else None
@@ -262,6 +273,7 @@ def run(conn, r2=None, since_term: int | None = None, fetch_text: bool = True,
                 if time.monotonic() > deadline:
                     print(f"Time budget reached in term {term}; resuming next run", flush=True)
                     return count
+                claim_cite(conn, row["docket"], row.get("us_cite"))
                 if already_loaded(conn, row["docket"], row.get("us_cite")):
                     continue
                 try:
