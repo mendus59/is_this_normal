@@ -17,6 +17,14 @@ from itn.ingest import cap_scotus as cap
 SOURCE = "cited_scotus"
 
 
+def full_date(value: str | None) -> str | None:
+    """CAP gives some early decisions only a year or a month ("1786-03")."""
+    if not value:
+        return None
+    parts = (value.split("-") + ["01", "01"])[:3]
+    return "-".join(p.zfill(2) for p in parts)
+
+
 def wanted(conn) -> dict[int, set[int]]:
     """Volume -> first pages of Supreme Court cases cited by the corpus itself (not by
     other cited cases, which would pull in the whole U.S. Reports) that aren't loaded."""
@@ -57,6 +65,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                 cite = cap.us_cite(case)
                 if not cite or int(cite[1]) not in pages:
                     continue
+                case["decision_date"] = full_date(case.get("decision_date"))
                 artifact = cap.to_artifact(case, *cite)
                 artifact["in_scope"] = False
                 artifact["closure_depth"] = 1
