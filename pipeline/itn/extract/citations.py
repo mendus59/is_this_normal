@@ -35,6 +35,8 @@ def _target(cite) -> str | None:
 def extract(text: str, citing_date: str | None = None) -> list[dict]:
     """Citation rows (without from_component/extractor) for one opinion's text."""
     rows, seen = [], set()
+    if not (text or "").strip():
+        return rows
     for cite in get_citations(text):
         target = _target(cite)
         if not target:
