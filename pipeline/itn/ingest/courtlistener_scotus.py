@@ -98,10 +98,38 @@ def cluster_from_hit(hit: dict) -> dict:
         "citations": cites,
         "syllabus": hit.get("syllabus"),
         "judges": hit.get("judge"),
-        "docket_number": hit.get("docketNumber"),
+        "docket_number": clean_docket(hit.get("docketNumber")),
         "status": hit.get("status"),
         "scdb_id": hit.get("scdb_id"),
     }
+
+
+def clean_docket(value: str | None) -> str | None:
+    """'No. 13-1352' -> '13-1352', so a docket matches the one other sources stored."""
+    value = re.sub(r"^\s*Nos?\.\s*", "", value or "").strip()
+    return value or None
+
+
+LEAD_KINDS = {"majority", "plurality", "unanimous", "opinion"}
+MIN_DECISION_CHARS = 3000
+
+
+def is_decision(comps: list[tuple[dict, str]]) -> bool:
+    """A Court opinion of real length. Orders lists (cert denied, often with a dissent
+    from the denial) come through the API as cases too; they aren't rulings."""
+    return any(c["kind"] in LEAD_KINDS and len(text or "") >= MIN_DECISION_CHARS
+               for c, text in comps)
+
+
+def drop_orders(conn) -> int:
+    """Remove orders-list entries earlier runs loaded as cases (docket-keyed, from
+    CourtListener, from the 2014 term on, where the bound volumes give every ruling)."""
+    cur = conn.execute(
+        "DELETE FROM artifact WHERE id LIKE 'scotus/docket-%%' AND metadata ? 'courtlistener_cluster'"
+        " AND effective_date >= '2014-10-01' RETURNING id")
+    n = len(cur.fetchall())
+    conn.commit()
+    return n
 
 
 def artifact_id(cluster: dict, docket_number: str | None) -> str | None:
@@ -220,6 +248,11 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
     token = require("COURTLISTENER_TOKEN")
     deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
+    if not cursor.get("orders_dropped_v1"):
+        print(f"Removed {drop_orders(conn)} orders-list entries loaded as cases", flush=True)
+        cursor["orders_dropped_v1"] = True
+        db.set_cursor(conn, SOURCE, cursor)
+        conn.commit()
     start = since or cursor.get("next_date") or SCOPE_START
     count = skipped = 0
     with http.client() as client:
@@ -261,8 +294,10 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
                     if not aid:
                         print(f"Skipping cluster {cluster['id']}: no U.S. cite or docket number", flush=True)
                         continue
-                    artifact = to_artifact(cluster, aid, docket_number)
                     comps = to_components(aid, opinions)
+                    if not is_decision(comps):
+                        continue  # an orders-list entry, not a ruling
+                    artifact = to_artifact(cluster, aid, docket_number)
                     artifact["metadata"]["opinions"] = len(comps)
                     db.upsert_artifact(conn, artifact)
                     for comp, text in comps:
@@ -276,7 +311,8 @@ def run(conn, r2=None, since: str | None = None, fetch_text: bool = True,
                     count += 1
                 # Only move the cursor while nothing has been skipped, so skips are retried.
                 if not skipped and cluster.get("date_filed"):
-                    db.set_cursor(conn, SOURCE, {"next_date": cluster["date_filed"]})
+                    db.set_cursor(conn, SOURCE, {"next_date": cluster["date_filed"],
+                                                 "orders_dropped_v1": True})
                     conn.commit()
                 if count and count % 100 == 0 and not done:
                     print(f"{cluster.get('date_filed')}: {count} cases so far, {skipped} skipped", flush=True)

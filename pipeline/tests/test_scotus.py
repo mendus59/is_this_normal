@@ -188,3 +188,17 @@ def test_extract_handles_empty_text():
     assert citations.extract("") == []
     assert citations.extract("   \n") == []
     assert citations.extract(None) == []
+
+
+def test_courtlistener_docket_and_orders_filter():
+    from itn.ingest.courtlistener_scotus import clean_docket, is_decision
+    assert clean_docket("No. 13-1352") == "13-1352"
+    assert clean_docket("Nos. 14-556") == "14-556"
+    assert clean_docket("14-5142") == "14-5142"
+    assert clean_docket("") is None
+    order = [({"kind": "opinion"}, "Petition for writ of certiorari denied.")]
+    dissent_from_denial = [({"kind": "dissent"}, "x" * 8000)]
+    ruling = [({"kind": "majority"}, "y" * 9000), ({"kind": "dissent"}, "z" * 4000)]
+    assert not is_decision(order)
+    assert not is_decision(dissent_from_denial)
+    assert is_decision(ruling)

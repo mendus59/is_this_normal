@@ -94,8 +94,9 @@ def page_offset(numbers: list[int | None]) -> int | None:
 
 _DECIDED = re.compile(r"Decided ([A-Z][a-z]+ \d{1,2}, \d{4})")
 _DOCKET = re.compile(r"\bNos?\. (\d{1,2}[–-]\d{1,5}|\d{1,2}A\d{1,4})")
-GAP = ("2014-10-01", "2019-10-01")  # decision dates no other source has covered
-FIRST_VOLUME, LAST_VOLUME = 574, 591
+GAP = ("2014-01-01", "2019-10-01")  # decision dates no other source fully covers
+# (case.law ends partway through volume 572, so the spring 2014 rulings in 573 need this)
+FIRST_VOLUME, LAST_VOLUME = 572, 591
 
 
 def case_start(text: str) -> dict | None:
