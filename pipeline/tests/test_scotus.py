@@ -163,3 +163,21 @@ def test_usc_page_text_and_heading():
     a = to_artifact("usc/42/1983", "42", "1983", text,
                     "https://www.govinfo.gov/content/pkg/USCODE-2023-title42/html/USCODE-2023-title42-chap21-subchapI-sec1983.htm")
     assert a["metadata"]["edition"] == "2023" and a["type"] == "usc_section" and not a["in_scope"]
+
+
+def test_best_per_page_prefers_decision_then_length():
+    from itn.ingest.cited_scotus import best_per_page
+
+    def case(page, kind, text):
+        return {"citations": [{"cite": f"538 U.S. {page}"}],
+                "casebody": {"opinions": [{"type": kind, "text": text}]}}
+
+    order = case(901, "majority", "Certiorari denied.")
+    long_order = case(901, "dissent", "x" * 5000)
+    decision = case(901, "majority", "y" * 3000)
+    other = case(902, "majority", "short")
+    skipped = case(903, "majority", "z" * 3000)
+    best = best_per_page([order, long_order, decision, other, skipped], {901, 902})
+    assert set(best) == {901, 902}
+    assert best[901] is decision
+    assert best[902] is other
