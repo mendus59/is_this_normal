@@ -151,3 +151,15 @@ def test_full_date():
     assert full_date("1801") == "1801-01-01"
     assert full_date("1965-06-07") == "1965-06-07"
     assert full_date(None) is None
+
+
+def test_usc_page_text_and_heading():
+    from itn.ingest.cited_usc import heading, page_text, to_artifact
+    page = ("<html><head><title>x</title></head><body><h3>§1983. Civil action for deprivation of rights</h3>"
+            "<p>Every person who, under color of any statute&hellip;</p></body></html>")
+    text = page_text(page)
+    assert text.startswith("§1983. Civil action") and "Every person who" in text
+    assert heading(text, "42", "1983") == "42 U.S.C. §1983. Civil action for deprivation of rights"
+    a = to_artifact("usc/42/1983", "42", "1983", text,
+                    "https://www.govinfo.gov/content/pkg/USCODE-2023-title42/html/USCODE-2023-title42-chap21-subchapI-sec1983.htm")
+    assert a["metadata"]["edition"] == "2023" and a["type"] == "usc_section" and not a["in_scope"]
