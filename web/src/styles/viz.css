@@ -1,0 +1,50 @@
+/* Chart tokens. Categorical slots are fixed per entity (see TYPE_COLOR in the pages)
+   and validated as an adjacent-pair set in both modes. */
+:root {
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+  --series-other: #a9a8a0;
+  /* Normalcy bands: one blue ramp, darker = less normal. */
+  --band-routine: #86b6ef; --band-ordinary: #5598e7; --band-unusual: #2a78d6; --band-novel: #1c5cab; --band-unprecedented: #104281;
+  --band-none: #c9c8c0;
+  --viz-grid: #e1e0d9; --viz-base: #c3c2b7; --viz-muted: #6d6b65;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    --series-other: #6b6a64;
+    /* Darker = more normal, so the unusual end stands out on the dark surface. */
+    --band-routine: #184f95; --band-ordinary: #256abf; --band-unusual: #3987e5; --band-novel: #6da7ec; --band-unprecedented: #b7d3f6;
+    --band-none: #44443f;
+    --viz-grid: #2c2c2a; --viz-base: #383835; --viz-muted: #9a988f;
+  }
+}
+
+.viz { position: relative; }
+.viz-svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+.viz-grid { stroke: var(--viz-grid); stroke-width: 1; }
+.viz-base { stroke: var(--viz-base); stroke-width: 1; }
+.viz-tick { fill: var(--viz-muted); font: 11px var(--font-body); font-variant-numeric: tabular-nums; }
+.viz-hit { fill: transparent; }
+.viz-bar.on .viz-hit { fill: var(--ink); fill-opacity: .06; }
+.viz-cross { stroke: var(--viz-base); stroke-width: 1; }
+.viz-dot { stroke: var(--sheet); stroke-width: 2; }
+.viz-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 0; margin: 0 0 8px; font-size: 13px; color: var(--ink-soft); }
+.viz-legend li { display: flex; align-items: center; gap: 6px; }
+.viz .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.viz .sw.line { height: 3px; width: 14px; border-radius: 2px; }
+.viz-tip { position: absolute; z-index: 2; pointer-events: none; min-width: 160px; max-width: 280px; background: var(--sheet); color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0,0,0,.12); }
+.viz-tip .h { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; margin-bottom: 4px; }
+.viz-tip .r { display: flex; align-items: center; gap: 6px; color: var(--ink-soft); }
+.viz-tip .r b, .viz-tip .h b { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
+.viz-tip .f { margin-top: 4px; color: var(--ink-soft); font-size: 11.5px; }
+.viz-note { font-size: 12px; color: var(--ink-soft); margin: 4px 0 0; }
+.viz-table { border-collapse: collapse; font-size: 13px; width: 100%; font-variant-numeric: tabular-nums; }
+.viz-table th, .viz-table td { padding: 4px 8px; border-bottom: 1px solid var(--rule); text-align: right; white-space: nowrap; }
+.viz-table th:first-child { text-align: left; }
+.viz-table thead th { color: var(--ink-soft); font-weight: 600; }
+.table-wrap { overflow-x: auto; max-width: 100%; }
+@media (forced-colors: active) {
+  .viz-svg path { forced-color-adjust: none; }
+}

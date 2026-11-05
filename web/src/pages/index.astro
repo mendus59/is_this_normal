@@ -1,81 +1,125 @@
 ---
 import Base from "../layouts/Base.astro";
-const dataBase = import.meta.env.PUBLIC_DATA_BASE_URL ?? "";
+import Filters from "../components/Filters.astro";
+import "../styles/viz.css";
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 ---
 <Base title="IsThisNormal">
   <h1>Is this normal?</h1>
   <p class="lede">Supreme Court rulings, executive actions, and contentious laws since 2000, measured against the precedent that existed when they happened.</p>
-  <div class="filters">
-    <label>Type
-      <select id="f-type">
-        <option value="">All</option>
-        <option value="scotus_case">Supreme Court</option>
-        <option value="public_law">Laws</option>
-        <option value="executive_document">Executive documents</option>
-        <option value="action_event">Executive actions</option>
-      </select>
-    </label>
-    <label>Search titles <input id="f-q" type="search" placeholder="e.g. cybersecurity" /></label>
-  </div>
-  <p id="status" class="status">Loading catalog…</p>
+  <Filters showSort />
+  <section class="overview" aria-label="Results by year">
+    <div class="overview-head">
+      <p id="status" class="status" aria-live="polite">Loading catalog…</p>
+      <a id="trend-link" class="trend-link" href={`${base}/trends/`}>See these results as trends</a>
+    </div>
+    <div id="year-strip" class="year-strip"></div>
+  </section>
   <ol id="list" class="list"></ol>
+  <button id="more" class="more" type="button" hidden>Show more</button>
 </Base>
 
-<script define:vars={{ dataBase, base }}>
-  const status = document.getElementById("status");
-  const list = document.getElementById("list");
-  const fType = document.getElementById("f-type");
-  const fQ = document.getElementById("f-q");
-  const TYPE_LABEL = { scotus_case: "Supreme Court", public_law: "Law", executive_document: "Executive", action_event: "Executive action" };
-  let catalog = [];
+<script>
+  import { loadCatalog, parseQuery, applyFilters, relevance, yearSpan, countByYear, typeSeries, thisYear, TYPE_LABEL, humanize, bandLabel } from "../lib/catalog.js";
+  import { bindFilters } from "../lib/filter-ui.js";
+  import { stackedBars } from "../lib/charts.js";
 
-  function render() {
-    const q = fQ.value.trim().toLowerCase();
-    const rows = catalog.filter((a) => (!fType.value || a.type === fType.value) && (!q || a.title.toLowerCase().includes(q)));
-    status.textContent = `${rows.length.toLocaleString()} of ${catalog.length.toLocaleString()} artifacts`;
-    list.replaceChildren(...rows.slice(0, 500).map((a) => {
-      const li = document.createElement("li");
-      const src = a.sources?.[0];
-      li.innerHTML = `
-        <div class="row-meta"><span class="mono">${a.id}</span><span>${TYPE_LABEL[a.type] ?? a.type}${a.subtype ? " · " + a.subtype.replaceAll("_", " ") : ""}</span><span>${a.date ?? ""}</span></div>
-        <a class="row-title"></a>
-        ${a.band ? `<span class="band band-${a.band}">${a.band} · ${a.percentile}</span>` : `<span class="band">not yet analyzed</span>`}`;
-      const title = li.querySelector(".row-title");
-      title.textContent = a.title;
-      title.href = `${base}/read/?id=${encodeURIComponent(a.id)}`;
-      if (src) {
-        const link = document.createElement("a");
-        link.href = src.url; link.textContent = src.label; link.rel = "noopener";
-        li.append(" ", link);
-      }
-      return li;
-    }));
-  }
+  const PAGE = 100;
+  const status = document.getElementById("status")!;
+  const list = document.getElementById("list")!;
+  const more = document.getElementById("more") as HTMLButtonElement;
+  const strip = document.getElementById("year-strip")!;
+  const trendLink = document.getElementById("trend-link") as HTMLAnchorElement;
+  const trendBase = trendLink.getAttribute("href");
 
-  async function load() {
-    if (!dataBase) { status.textContent = "No data source configured yet. Set PUBLIC_DATA_BASE_URL (see SETUP.md)."; return; }
-    try {
-      const manifest = await (await fetch(`${dataBase}/manifest.json`, { cache: "no-cache" })).json();
-      catalog = await (await fetch(`${dataBase}/${manifest.prefix}/catalog.json`)).json();
-      render();
-    } catch (err) {
-      status.textContent = `Could not load the catalog from ${dataBase}. Check the bucket's public access and CORS settings.`;
+  let catalog: any[] = [];
+  let rows: any[] = [];
+  let shown = 0;
+  let years: number[] = [];
+  let ui: ReturnType<typeof bindFilters>;
+
+  const SORTS: Record<string, (a: any, b: any) => number> = {
+    oldest: (a, b) => (a.date ?? "9999").localeCompare(b.date ?? "9999"),
+    unusual: (a, b) => (a.percentile ?? Infinity) - (b.percentile ?? Infinity),
+    normal: (a, b) => (b.percentile ?? -Infinity) - (a.percentile ?? -Infinity),
+  };
+
+  function item(a: any) {
+    const li = document.createElement("li");
+    const meta = document.createElement("div");
+    meta.className = "row-meta";
+    const id = document.createElement("span");
+    id.className = "mono"; id.textContent = a.id;
+    const kind = document.createElement("span");
+    kind.textContent = (TYPE_LABEL[a.type] ?? a.type) + (a.subtype ? " · " + humanize(a.subtype) : "");
+    const date = document.createElement("span");
+    date.textContent = a.date ?? "";
+    meta.append(id, kind, date);
+    const title = document.createElement("a");
+    title.className = "row-title"; title.textContent = a.title;
+    title.href = `${trendBase.replace(/trends\/$/, "")}read/?id=${encodeURIComponent(a.id)}`;
+    const band = document.createElement("span");
+    band.className = `band band-${a.bandKey}`;
+    band.textContent = a.band ? `${bandLabel(a.band)} · ${a.percentile}` : "not yet analyzed";
+    li.append(meta, title, band);
+    const src = a.sources?.[0];
+    if (src?.url) {
+      const link = document.createElement("a");
+      link.href = src.url; link.textContent = src.label ?? "Source"; link.rel = "noopener";
+      li.append(" ", link);
     }
+    return li;
   }
-  fType.addEventListener("change", render);
-  fQ.addEventListener("input", render);
-  load();
+
+  function renderMore() {
+    const next = rows.slice(shown, shown + PAGE);
+    list.append(...next.map(item));
+    shown += next.length;
+    more.hidden = shown >= rows.length;
+    more.textContent = `Show more (${(rows.length - shown).toLocaleString()} left)`;
+  }
+
+  function render(f: any) {
+    const parsed = parseQuery(f.q);
+    rows = applyFilters(catalog, f, parsed);
+    const sort = f.sort === "relevance" && !parsed.groups.length ? "" : f.sort;
+    if (sort === "relevance") {
+      const score = new Map(rows.map((a) => [a, relevance(a, parsed)]));
+      rows.sort((a, b) => score.get(b) - score.get(a) || (b.date ?? "").localeCompare(a.date ?? ""));
+    } else if (SORTS[sort]) rows.sort(SORTS[sort]);
+    status.textContent = `${rows.length.toLocaleString()} of ${catalog.length.toLocaleString()} items`;
+    list.replaceChildren();
+    shown = 0;
+    renderMore();
+    const qs = location.search;
+    trendLink.href = `${trendBase}${qs}`;
+    stackedBars(strip, {
+      years, series: typeSeries(rows), values: countByYear(rows, years, (a) => a.type, typeSeries(rows).map((s) => s.key)),
+      height: 150, partialYear: thisYear(), unit: "items",
+      onBarClick: (yr: number) => ui.set({ from: String(yr), to: String(yr) }),
+    });
+  }
+
+  more.addEventListener("click", renderMore);
+  loadCatalog().then((c) => {
+    catalog = c;
+    years = yearSpan(catalog);
+    ui = bindFilters(catalog, render);
+    render(ui.current());
+    let w = strip.clientWidth;
+    new ResizeObserver(() => { if (strip.clientWidth !== w) { w = strip.clientWidth; render(ui.current()); } }).observe(strip);
+  }).catch((err) => { status.textContent = err.message; });
 </script>
 
 <style>
   .lede { color: var(--ink-soft); font-size: 18px; max-width: 62ch; }
-  .filters { display: flex; flex-wrap: wrap; gap: 16px; margin: 24px 0 8px; }
-  .filters label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-soft); }
-  select, input { font: inherit; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--ink); }
-  .status { color: var(--ink-soft); font-size: 14px; }
+  .overview { margin: 20px 0 16px; }
+  .overview-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; }
+  .status { color: var(--ink-soft); font-size: 14px; margin: 0 0 8px; }
+  .trend-link { font-size: 14px; }
+  .year-strip { min-height: 150px; }
   .list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
-  .list :global(li) { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; }
+  .list :global(li) { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; overflow-wrap: anywhere; }
   .list :global(.row-meta) { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--ink-soft); }
   .list :global(.row-title) { display: block; font-weight: 600; margin: 4px 0 6px; color: var(--ink); text-decoration: none; }
   .list :global(.row-title:hover) { color: var(--accent); text-decoration: underline; }
@@ -83,4 +127,5 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .list :global(.band-routine), .list :global(.band-ordinary) { color: var(--ok); }
   .list :global(.band-novel) { color: var(--warn); }
   .list :global(.band-unprecedented) { color: var(--bad); }
+  .more { display: block; margin: 16px auto; font: inherit; padding: 8px 16px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--accent); cursor: pointer; }
 </style>

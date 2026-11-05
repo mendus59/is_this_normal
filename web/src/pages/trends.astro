@@ -1,0 +1,252 @@
+---
+import Base from "../layouts/Base.astro";
+import Filters from "../components/Filters.astro";
+import "../styles/viz.css";
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+<Base title="Trends · IsThisNormal">
+  <h1>Trends over the years</h1>
+  <p class="lede">How many rulings, laws, and executive actions there were each year, and how that changes with any search or filter. Every chart has a table view with the exact numbers.</p>
+  <Filters />
+
+  <section class="tiles" id="tiles" aria-live="polite"></section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Per year</h2>
+      <div class="controls">
+        <label>Break down by
+          <select id="t-by">
+            <option value="type">Type</option>
+            <option value="sub">Kind</option>
+            <option value="band">Normalcy</option>
+            <option value="none">Nothing</option>
+          </select>
+        </label>
+        <label>Show
+          <select id="t-show">
+            <option value="count">Counts</option>
+            <option value="share">Share of each year</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div id="by-year" class="chart"></div>
+    <details><summary>Table</summary><div class="table-wrap" id="by-year-table"></div></details>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Compare search terms</h2>
+      <label class="terms">Up to four terms, separated by commas
+        <input id="t-terms" type="search" autocomplete="off" placeholder="e.g. tariff, immigration, &quot;national emergency&quot;" />
+      </label>
+    </div>
+    <p class="sub">Items per year whose title, summary, or ID matches each term, within the filters above. Each term supports the same quotes, OR, and minus syntax as search.</p>
+    <div id="terms-chart" class="chart"></div>
+    <details><summary>Table</summary><div class="table-wrap" id="terms-table"></div></details>
+  </section>
+
+  <section class="card">
+    <h2>By administration</h2>
+    <p class="sub">Per year in office, so terms of different lengths compare fairly. Periods are set by date; for court cases this marks the time, not who decided them.</p>
+    <div id="admins" class="admins"></div>
+  </section>
+  <p class="back"><a id="browse-link" href={`${base}/`}>Browse these items</a></p>
+</Base>
+
+<script>
+  import { loadCatalog, applyFilters, parseQuery, matchesQuery, yearSpan, countByYear, typeSeries, subtypesFor, thisYear, humanize, bandLabel,
+    BANDS, NOT_ANALYZED, BAND_COLOR, ADMINS } from "../lib/catalog.js";
+  import { bindFilters } from "../lib/filter-ui.js";
+  import { stackedBars, lines, table } from "../lib/charts.js";
+
+  const $ = (id: string) => document.getElementById(id)!;
+  const by = $("t-by") as HTMLSelectElement;
+  const show = $("t-show") as HTMLSelectElement;
+  const terms = $("t-terms") as HTMLInputElement;
+  const browseLink = $("browse-link") as HTMLAnchorElement;
+  const browseBase = browseLink.getAttribute("href");
+  const params = new URLSearchParams(location.search);
+  by.value = params.get("by") || "type";
+  show.value = params.get("show") || "count";
+  terms.value = params.get("terms") || "";
+
+  let catalog: any[] = [];
+  let allYears: number[] = [];
+  let ui: ReturnType<typeof bindFilters>;
+  const extra = () => ({ by: by.value === "type" ? "" : by.value, show: show.value === "count" ? "" : show.value, terms: terms.value.trim() });
+  const SLOTS = 7;
+
+  function yearsFor(f: any) {
+    return allYears.filter((y) => (!f.from || y >= Number(f.from)) && (!f.to || y <= Number(f.to)));
+  }
+
+  function breakdown(rows: any[]) {
+    if (by.value === "band") {
+      const keys = [...BANDS, NOT_ANALYZED].filter((b) => rows.some((a) => a.bandKey === b));
+      return { keyOf: (a: any) => a.bandKey, series: keys.map((b) => ({ key: b, label: bandLabel(b), color: BAND_COLOR[b] })) };
+    }
+    if (by.value === "sub") {
+      // Rank kinds over the whole catalog so a kind keeps its color under any filter.
+      const ranked = subtypesFor(catalog, "");
+      const top = ranked.slice(0, SLOTS);
+      const present = new Set(rows.map((a) => a.subtype));
+      const series = top.map((s, i) => ({ key: s, label: humanize(s), color: `var(--series-${i + 1})` })).filter((s) => present.has(s.key));
+      const hasOther = rows.some((a) => !top.includes(a.subtype));
+      if (hasOther) series.push({ key: "__other", label: "All other kinds", color: "var(--series-other)" });
+      return { keyOf: (a: any) => (top.includes(a.subtype) ? a.subtype : "__other"), series };
+    }
+    if (by.value === "none") return { keyOf: () => "all", series: [{ key: "all", label: "Items", color: "var(--series-1)" }] };
+    const series = typeSeries(rows);
+    return { keyOf: (a: any) => a.type, series };
+  }
+
+  function tiles(rows: any[], years: number[]) {
+    const counts = countByYear(rows, years, () => "all", ["all"]).all;
+    const cur = thisYear();
+    const full = years.map((y, i) => [y, counts[i]] as const).filter(([y]) => y < cur);
+    const peak = full.reduce((best, x) => (x[1] > best[1] ? x : best), [0, -1] as readonly [number, number]);
+    const last = full.at(-1), prev = full.at(-2);
+    const avg = full.length ? full.reduce((s, x) => s + x[1], 0) / full.length : 0;
+    const tile = (label: string, value: string, note = "") =>
+      `<div class="tile"><div class="tl">${label}</div><div class="tv">${value}</div>${note ? `<div class="tn">${note}</div>` : ""}</div>`;
+    const diff = last && prev && prev[1] ? Math.round((100 * (last[1] - prev[1])) / prev[1]) : null;
+    $("tiles").innerHTML = [
+      tile("Matching items", rows.length.toLocaleString()),
+      tile("Average per full year", Math.round(avg).toLocaleString()),
+      peak[1] >= 0 ? tile("Busiest full year", String(peak[0]), `${peak[1].toLocaleString()} items`) : "",
+      last ? tile(`${last[0]} vs ${prev?.[0] ?? "—"}`, diff === null ? "—" : `${diff > 0 ? "+" : ""}${diff}%`, `${last[1].toLocaleString()} vs ${(prev?.[1] ?? 0).toLocaleString()} items`) : "",
+    ].join("");
+  }
+
+  function admins(rows: any[], f: any) {
+    const today = new Date().toISOString().slice(0, 10);
+    const first = catalog.reduce((m, a) => (a.date && a.date < m ? a.date : m), today);
+    const lo = f.from ? `${f.from}-01-01` : first;
+    const hi = f.to ? (Number(f.to) >= thisYear() ? today : `${f.to}-12-31`) : today;
+    const data = ADMINS.map((a, i) => {
+      const end = ADMINS[i + 1]?.start ?? "9999-12-31";
+      const s = a.start > lo ? a.start : lo;
+      const e = end < hi ? end : hi;
+      const yrs = (Date.parse(e) - Date.parse(s)) / (365.25 * 864e5);
+      const n = rows.filter((x) => x.admin === a.id).length;
+      return { ...a, n, yrs, rate: yrs > 0.05 ? n / yrs : null };
+    }).filter((d) => d.yrs > 0.05);
+    const max = Math.max(1, ...data.map((d) => d.rate ?? 0));
+    const host = $("admins");
+    host.replaceChildren(...data.map((d) => {
+      const row = document.createElement("div");
+      row.className = "admin-row";
+      const name = document.createElement("span");
+      name.className = "an"; name.textContent = d.label;
+      const track = document.createElement("span");
+      track.className = "at";
+      const bar = document.createElement("span");
+      bar.className = "ab";
+      bar.style.width = `${((d.rate ?? 0) / max) * 100}%`;
+      track.append(bar);
+      const val = document.createElement("span");
+      val.className = "av";
+      val.textContent = `${(d.rate ?? 0).toLocaleString(undefined, { maximumFractionDigits: 1 })} / yr`;
+      val.title = `${d.n.toLocaleString()} items over ${d.yrs.toFixed(1)} years in range`;
+      const tot = document.createElement("span");
+      tot.className = "atot";
+      tot.textContent = `${d.n.toLocaleString()} total`;
+      row.append(name, track, val, tot);
+      return row;
+    }));
+  }
+
+  function render(f: any) {
+    const rows = applyFilters(catalog, f);
+    const years = yearsFor(f);
+    tiles(rows, years);
+
+    const { keyOf, series } = breakdown(rows);
+    const values = countByYear(rows, years, keyOf, series.map((s) => s.key));
+    const opts = { years, series, values, percent: show.value === "share", partialYear: thisYear(), unit: "items",
+      onBarClick: (yr: number) => { location.href = `${browseBase}?${new URLSearchParams({ ...pick(f), from: String(yr), to: String(yr) })}`; } };
+    if (!rows.length) $("by-year").textContent = "Nothing matches these filters.";
+    else stackedBars($("by-year"), opts);
+    table($("by-year-table"), { years, series, values });
+
+    const list = splitTerms(terms.value).slice(0, 4);
+    const termHost = $("terms-chart");
+    if (!list.length) {
+      termHost.textContent = "Type a few terms above to compare them.";
+      $("terms-table").replaceChildren();
+    } else {
+      const tSeries = list.map((t, i) => ({ key: `t${i}`, label: t, color: `var(--series-${i + 1})` }));
+      const tValues: Record<string, number[]> = {};
+      list.forEach((t, i) => {
+        const p = parseQuery(t);
+        tValues[`t${i}`] = countByYear(rows.filter((a) => matchesQuery(a, p)), years, () => "x", ["x"]).x;
+      });
+      lines(termHost, { years, series: tSeries, values: tValues, partialYear: thisYear(), unit: "items" });
+      table($("terms-table"), { years, series: tSeries, values: tValues, total: false });
+    }
+    admins(rows, f);
+    browseLink.href = `${browseBase}?${new URLSearchParams(pick(f))}`;
+  }
+
+  const pick = (f: any) => Object.fromEntries(Object.entries(f).filter(([, v]) => v)) as Record<string, string>;
+  function splitTerms(s: string) {
+    // Commas inside quotes stay part of the term.
+    const out: string[] = [];
+    let cur = "", q = false;
+    for (const ch of s) {
+      if (ch === '"') q = !q;
+      if (ch === "," && !q) { out.push(cur); cur = ""; } else cur += ch;
+    }
+    out.push(cur);
+    return out.map((t) => t.trim()).filter(Boolean);
+  }
+
+  loadCatalog().then((c) => {
+    catalog = c;
+    allYears = yearSpan(catalog);
+    ui = bindFilters(catalog, render, { extra });
+    const rerender = () => { ui.refresh(); };
+    by.addEventListener("change", rerender);
+    show.addEventListener("change", rerender);
+    let t: number | undefined;
+    terms.addEventListener("input", () => { clearTimeout(t); t = window.setTimeout(rerender, 250); });
+    render(ui.current());
+    let w = $("by-year").clientWidth;
+    new ResizeObserver(() => { const nw = $("by-year").clientWidth; if (nw !== w) { w = nw; render(ui.current()); } }).observe($("by-year"));
+  }).catch((err) => { $("tiles").textContent = err.message; });
+</script>
+
+<style>
+  .lede { color: var(--ink-soft); font-size: 18px; max-width: 62ch; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 20px 0; }
+  .tiles :global(.tile) { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }
+  .tiles :global(.tl) { font-size: 12.5px; color: var(--ink-soft); }
+  .tiles :global(.tv) { font-size: 26px; font-weight: 700; line-height: 1.2; }
+  .tiles :global(.tn) { font-size: 12px; color: var(--ink-soft); }
+  .card { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; margin: 0 0 16px; min-width: 0; }
+  .card h2 { font-size: 20px; margin: 0 0 6px; }
+  .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 8px 16px; margin-bottom: 10px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; }
+  .controls label, .terms { display: grid; gap: 4px; font-size: 13px; color: var(--ink-soft); }
+  .terms { flex: 1 1 280px; }
+  select, input { font: inherit; font-size: 15px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--ink); max-width: 100%; }
+  .sub { font-size: 13.5px; color: var(--ink-soft); margin: 0 0 10px; max-width: 70ch; }
+  .chart { min-height: 120px; color: var(--ink-soft); font-size: 14px; }
+  details { margin-top: 8px; font-size: 13.5px; }
+  summary { cursor: pointer; color: var(--accent); }
+  .admins { display: grid; gap: 6px; }
+  .admins :global(.admin-row) { display: grid; grid-template-columns: minmax(90px, 140px) 1fr auto auto; align-items: center; gap: 10px; font-size: 13.5px; }
+  .admins :global(.an) { color: var(--ink); }
+  .admins :global(.at) { height: 14px; display: block; }
+  .admins :global(.ab) { display: block; height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .admins :global(.av) { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; min-width: 72px; }
+  .admins :global(.atot) { font-variant-numeric: tabular-nums; color: var(--ink-soft); text-align: right; min-width: 80px; }
+  @media (max-width: 520px) {
+    .admins :global(.admin-row) { grid-template-columns: 1fr auto; }
+    .admins :global(.at) { grid-column: 1 / -1; order: 3; }
+    .admins :global(.atot) { display: none; }
+  }
+  .back { font-size: 14px; }
+</style>
