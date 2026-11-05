@@ -9,6 +9,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     <p class="meta"><span id="d-id" class="mono"></span> <span id="d-date"></span></p>
     <h1 id="d-title"></h1>
     <p id="d-scope" class="note" hidden>Cited by the corpus. It is here to be read, not scored.</p>
+    <p id="d-usc" class="note" hidden>This is the latest annual edition of the U.S. Code. The text in force when a ruling or law cited it may have been different.</p>
     <p id="d-sources" class="sources"></p>
     <section id="d-summary" hidden><h2>Summary</h2><p class="summary"></p></section>
     <section id="d-opinions" hidden>
@@ -101,6 +102,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     $("d-date").textContent = doc.date ?? "";
     $("d-title").textContent = doc.title;
     $("d-scope").hidden = doc.in_scope;
+    $("d-usc").hidden = doc.type !== "usc_section";
     $("d-sources").replaceChildren(...(doc.sources ?? []).flatMap((s, i) => {
       const a = document.createElement("a");
       a.href = s.url; a.textContent = s.label; a.rel = "noopener";
