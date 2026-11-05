@@ -181,3 +181,10 @@ def test_best_per_page_prefers_decision_then_length():
     assert set(best) == {901, 902}
     assert best[901] is decision
     assert best[902] is other
+
+
+def test_extract_handles_empty_text():
+    from itn.extract import citations
+    assert citations.extract("") == []
+    assert citations.extract("   \n") == []
+    assert citations.extract(None) == []
