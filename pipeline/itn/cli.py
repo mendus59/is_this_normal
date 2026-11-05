@@ -72,6 +72,20 @@ STATUS_QUERIES = [
      " JOIN artifact src ON src.id = f.artifact_id AND src.closure_depth = 0"
      " LEFT JOIN artifact a ON a.id = c.to_artifact"
      " WHERE c.to_artifact ~ '^scotus/[0-9]+-us-[0-9]+$' AND a.id IS NULL GROUP BY 1 ORDER BY 1"),
+    ("Docket-keyed Supreme Court cases by source and year",
+     "SELECT metadata->>'source', extract(year FROM effective_date)::int, count(*) FROM artifact"
+     " WHERE type = 'scotus_case' AND id LIKE 'scotus/docket-%%' GROUP BY 1, 2 ORDER BY 1, 2"),
+    ("Sample of docket-keyed Supreme Court cases",
+     "SELECT id, effective_date, left(title, 80), metadata->>'opinions', metadata->>'source'"
+     " FROM artifact WHERE type = 'scotus_case' AND id LIKE 'scotus/docket-%%'"
+     " ORDER BY random() LIMIT 20"),
+    ("Sample of cited 2015+ cases not loaded",
+     "SELECT DISTINCT c.to_artifact, left(c.raw_text, 80) FROM citation c"
+     " JOIN component f ON f.id = c.from_component"
+     " JOIN artifact src ON src.id = f.artifact_id AND src.closure_depth = 0"
+     " LEFT JOIN artifact a ON a.id = c.to_artifact"
+     " WHERE c.to_artifact ~ '^scotus/(57[3-9]|5[89][0-9]|6[0-9][0-9])-us-[0-9]+$' AND a.id IS NULL"
+     " LIMIT 25"),
     ("Ingest cursors", "SELECT source, left(cursor::text, 200) FROM ingest_cursor ORDER BY source"),
 ]
 
