@@ -1,0 +1,62 @@
+---
+import { TYPES, ADMINS, BANDS, NOT_ANALYZED, bandLabel } from "../lib/catalog.js";
+interface Props { showSort?: boolean }
+const { showSort = false } = Astro.props;
+---
+<form class="filters" role="search" onsubmit="return false">
+  <label class="q">Search
+    <input id="f-q" type="search" autocomplete="off" placeholder='e.g. tariff OR "trade agreement" -steel' />
+  </label>
+  <label>Type
+    <select id="f-type">
+      <option value="">All</option>
+      {TYPES.map((t) => <option value={t.id}>{t.label}</option>)}
+    </select>
+  </label>
+  <label>Kind
+    <select id="f-sub"><option value="">All</option></select>
+  </label>
+  <label>From
+    <select id="f-from"><option value="">Any</option></select>
+  </label>
+  <label>To
+    <select id="f-to"><option value="">Any</option></select>
+  </label>
+  <label>Administration
+    <select id="f-admin">
+      <option value="">Any</option>
+      {ADMINS.map((a) => <option value={a.id}>{a.label}</option>)}
+    </select>
+  </label>
+  <label>Normalcy
+    <select id="f-band">
+      <option value="">Any</option>
+      {BANDS.map((b) => <option value={b}>{bandLabel(b)}</option>)}
+      <option value={NOT_ANALYZED}>{bandLabel(NOT_ANALYZED)}</option>
+    </select>
+  </label>
+  {showSort && (
+    <label>Sort
+      <select id="f-sort">
+        <option value="">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="relevance">Best match</option>
+        <option value="unusual">Least normal first</option>
+        <option value="normal">Most normal first</option>
+      </select>
+    </label>
+  )}
+  <button id="f-reset" type="button" class="reset">Clear</button>
+</form>
+<p class="hint">Search covers titles, summaries, and IDs. Use quotes for a phrase, OR for alternatives, and a leading minus to exclude a word.</p>
+
+<style>
+  .filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 14px; margin: 24px 0 4px; }
+  .filters label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-soft); min-width: 0; }
+  .filters .q { flex: 1 1 100%; }
+  .filters .q input { width: 100%; }
+  select, input, .reset { font: inherit; font-size: 15px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--ink); max-width: 100%; }
+  select:disabled { opacity: .5; }
+  .reset { cursor: pointer; color: var(--accent); }
+  .hint { font-size: 12.5px; color: var(--ink-soft); margin: 6px 0 0; }
+</style>
