@@ -56,6 +56,36 @@ def cmd_publish(args) -> None:
     print("Published version", version)
 
 
+STATUS_QUERIES = [
+    ("Artifacts by type (in scope / cited)",
+     "SELECT type, count(*) FILTER (WHERE in_scope), count(*) FILTER (WHERE NOT in_scope)"
+     " FROM artifact GROUP BY type ORDER BY type"),
+    ("Supreme Court cases in scope by year",
+     "SELECT extract(year FROM effective_date)::int, count(*),"
+     " count(*) FILTER (WHERE id LIKE 'scotus/docket-%%') FROM artifact"
+     " WHERE type = 'scotus_case' AND in_scope GROUP BY 1 ORDER BY 1"),
+    ("Supreme Court cases cited by the corpus but not loaded (by U.S. Reports volume range)",
+     "SELECT CASE WHEN split_part(split_part(c.to_artifact, '/', 2), '-', 1)::int < 528 THEN 'before 528 (pre-2000)'"
+     " WHEN split_part(split_part(c.to_artifact, '/', 2), '-', 1)::int <= 572 THEN '528-572'"
+     " ELSE '573 and later' END, count(DISTINCT c.to_artifact)"
+     " FROM citation c JOIN component f ON f.id = c.from_component"
+     " JOIN artifact src ON src.id = f.artifact_id AND src.closure_depth = 0"
+     " LEFT JOIN artifact a ON a.id = c.to_artifact"
+     " WHERE c.to_artifact ~ '^scotus/[0-9]+-us-[0-9]+$' AND a.id IS NULL GROUP BY 1 ORDER BY 1"),
+    ("Ingest cursors", "SELECT source, left(cursor::text, 200) FROM ingest_cursor ORDER BY source"),
+]
+
+
+def cmd_status(args) -> None:
+    """Free: counts of what is loaded and what is still missing."""
+    with db.connect() as conn:
+        for title, sql in STATUS_QUERIES:
+            print(f"\n{title}")
+            for row in conn.execute(sql).fetchall():
+                print("  " + " | ".join("" if v is None else str(v) for v in row))
+        conn.commit()
+
+
 def cmd_analyze(args) -> None:
     """Paid analysis. Only the `paid` GitHub environment has the API key."""
     scope = {"ids": args.ids, "type": args.type, "years": args.years, "unscored": args.unscored}
@@ -85,6 +115,7 @@ def main(argv=None) -> None:
     ing.set_defaults(fn=cmd_ingest)
 
     sub.add_parser("publish", help="export static files to R2 (free)").set_defaults(fn=cmd_publish)
+    sub.add_parser("status", help="counts of loaded and missing records (free)").set_defaults(fn=cmd_status)
 
     an = sub.add_parser("analyze", help="run paid analysis")
     an.add_argument("--ids", nargs="*", default=[])
