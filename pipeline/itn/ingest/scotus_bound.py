@@ -119,7 +119,10 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
     # v2: page numbers were read from the wrong part of the running head before.
     # v4: a case loaded under a wrong U.S. Reports page by another source matched by
     # docket number and was skipped; it is now refiled under the bound volume's page.
-    done = set(cursor.get("done_pdfs_v4", []))
+    # v5: mixed-case opinion labels ("Breyer, J., dissenting") weren't recognized, so
+    # pluralities and per curiams were skipped and dissents ran into the majority.
+    # This source's own cases are reloaded.
+    done = set(cursor.get("done_pdfs_v5", []))
     count = 0
     with http.client(timeout=600) as client:
         names: dict[str, dict] = {}
@@ -162,7 +165,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                     sc.claim_cite(conn, case["docket"], cite)
                     if cite:
                         refile(conn, case["docket"], cite)
-                    if sc.already_loaded(conn, case["docket"], cite):
+                    if sc.already_loaded(conn, case["docket"], cite) and not ours(conn, cite):
                         continue
                     end = starts[k + 1][0] if k + 1 < len(starts) else len(texts)
                     syllabus, parts = sc.split_opinions(texts[i:end])
@@ -181,7 +184,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                 if not starts:
                     print(f"  sample page: {texts[min(30, len(texts) - 1)][:300]!r}", flush=True)
                 done.add(url)
-                db.set_cursor(conn, SOURCE, {"done_pdfs_v4": sorted(done)})
+                db.set_cursor(conn, SOURCE, {"done_pdfs_v5": sorted(done)})
                 conn.commit()
     return count
 
@@ -199,6 +202,18 @@ def drop_misfiled(conn, docket: str, right_id: str | None) -> None:
 
 
 BOUND_SOURCE = "supremecourt.gov U.S. Reports"
+
+
+def ours(conn, cite: tuple[str, str] | None) -> bool:
+    """True if the case at this citation came from the Court's own PDFs (bound volumes,
+    preliminary prints or slip opinions), whose opinions were split with the same
+    labels, so a re-read may replace it."""
+    if not cite:
+        return False
+    row = conn.execute("SELECT metadata->>'source' FROM artifact WHERE id = %s",
+                       (ids.scotus_case(*cite),)).fetchone()
+    conn.commit()
+    return bool(row and row[0] in (BOUND_SOURCE, "supremecourt.gov"))
 
 
 def refile(conn, docket: str, cite: tuple[str, str]) -> None:
@@ -223,6 +238,8 @@ def load(conn, r2, fetch_text: bool, row: dict, syllabus, parts):
     artifact["metadata"]["oyez"] = row.get("oyez")
     artifact["metadata"]["source"] = BOUND_SOURCE
     db.upsert_artifact(conn, artifact)
+    # A reload replaces every opinion; drop ones an earlier split left behind.
+    conn.execute("DELETE FROM component WHERE artifact_id = %s", (aid,))
     for i, (label, text) in enumerate(parts):
         kind = sc.kind_of(label)
         comp = {"id": ids.component(aid, i, kind), "artifact_id": aid, "kind": kind,

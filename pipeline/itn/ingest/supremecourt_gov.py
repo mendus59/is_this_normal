@@ -37,10 +37,17 @@ _DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2}|\d{4})$")
 _US_CITE = re.compile(r"^(\d+) U\. ?S\. (\d+)$")
 
 # Running headers that name the opinion a page belongs to.
+# Slip opinions print justices' names in capitals ("KAGAN, J., dissenting"); the bound
+# volumes and preliminary prints use mixed case ("Kagan, J., dissenting").
+_NAME = r"[A-Z][A-Za-z'’ .-]*?"
 _LABEL = re.compile(
-    r"^(Syllabus|Per Curiam|Opinion of the Court|Opinion of (?:the )?[A-Z' ]+, (?:C\. )?J\.|"
-    r"(?:[A-Z' ]+), (?:C\. )?J\., (?:concurring|dissenting|statement|respecting)[^\n]*|"
-    r"Statement of [A-Z' ]+, (?:C\. )?J\.)$")
+    r"^(Syllabus|Per Curiam|Opinion of the Court|Opinion of (?:the )?" + _NAME + r", (?:C\. )?J\.|"
+    r"(?:" + _NAME + r"), (?:C\. )?J\., (?:concurring|dissenting|statement|respecting)[^\n]*|"
+    r"Statement of " + _NAME + r", (?:C\. )?J\.)$")
+# The first page of an opinion carries no running head; in the bound volumes it has no
+# "SUPREME COURT OF THE UNITED STATES" caption either, only the opening line.
+_OPENS = re.compile(r"delivered the opinion of the Court|announced the judgment of the Court"
+                    r"|^PER CURIAM\.?$|^Per Curiam\.?$")
 _DROP = re.compile(r"^(Cite as: .*|\d{1,3}|[A-Z0-9 .,'&v-]+ v\. [A-Z0-9 .,'&-]+)$")
 
 
@@ -93,7 +100,7 @@ def kind_of(label: str) -> str:
 
 
 def author_of(label: str) -> str | None:
-    m = re.search(r"([A-Z][A-Z' ]+), (?:C\. )?J\.", label)
+    m = re.match(r"(?:Opinion of |Statement of )?(" + _NAME + r"), (?:C\. )?J\.", label)
     if not m:
         return "Per Curiam" if label.lower() == "per curiam" else None
     return m.group(1).strip().title().replace("'S", "'s")
@@ -109,7 +116,8 @@ def split_opinions(pages: list[str]) -> tuple[str | None, list[tuple[str, str]]]
         lines = [ln.strip() for ln in page.splitlines()]
         label = next((ln for ln in lines[:8] if _LABEL.match(ln)), None)
         labels.append(label)
-        starts.append(any("SUPREME COURT OF THE UNITED STATES" in ln for ln in lines[:15]))
+        starts.append(any("SUPREME COURT OF THE UNITED STATES" in ln or _OPENS.search(ln)
+                          for ln in lines[:15]))
         bodies.append("\n".join(ln for ln in lines if ln and ln != label and not _DROP.match(ln)))
     for i in range(len(labels)):
         if labels[i] is None and starts[i]:
@@ -125,9 +133,12 @@ def split_opinions(pages: list[str]) -> tuple[str | None, list[tuple[str, str]]]
     for label, chunks in parts:
         text = "\n".join(chunks).strip()
         if label == "Syllabus":
-            syllabus = text
+            syllabus = text if syllabus is None else syllabus + "\n" + text
         else:
             out.append((label, text))
+    if not out and syllabus:
+        # A short per curiam with no running heads reads as all syllabus.
+        out = [("Per Curiam", syllabus)]
     return syllabus, out
 
 
