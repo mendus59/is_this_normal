@@ -126,3 +126,9 @@ def test_split_opinions_short_per_curiam():
              "Per Curiam.\nThe judgment is reversed."]
     _, parts = split_opinions(pages)
     assert len(parts) == 1 and "reversed" in parts[0][1]
+
+
+def test_revision_note_dropped_from_case_name():
+    from itn.ingest.supremecourt_gov import clean_name
+    assert clean_name("Trump v. Barbara Revisions : 7/01/26") == "Trump v. Barbara"
+    assert clean_name("Hamm v. Smith") == "Hamm v. Smith"
