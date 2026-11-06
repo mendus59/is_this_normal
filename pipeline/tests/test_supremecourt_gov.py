@@ -101,3 +101,28 @@ def test_print_ranges_and_pages():
 
     assert print_pages(Reader, 3, 6) == ["page 3", "page 4", "page 5"]
     assert print_pages(Reader, 6, None) == ["page 6", "page 7"]
+
+
+def test_split_opinions_bound_volume_mixed_case():
+    pages = [
+        "86 OCTOBER TERM, 2014\nSyllabus\nKERRY v. DIN\nNo. 13–1402. Argued February 23, 2015—Decided June 15, 2015",
+        "87\nCite as: 576 U. S. 86 (2015)\nSyllabus\nJustice Scalia announced the judgment of the Court.",
+        "88 KERRY v. DIN\nJustice Scalia announced the judgment of the Court and delivered an opinion.",
+        "89\nCite as: 576 U. S. 86 (2015)\nOpinion of Scalia, J.\nThe plurality reasons.",
+        "90 KERRY v. DIN\nKennedy, J., concurring in judgment\nJustice Kennedy, concurring.",
+        "91 KERRY v. DIN\nBreyer, J., dissenting\nJustice Breyer dissents.",
+    ]
+    syllabus, parts = split_opinions(pages)
+    assert "No. 13–1402" in syllabus
+    assert [label for label, _ in parts] == [
+        "Opinion of Scalia, J.", "Kennedy, J., concurring in judgment", "Breyer, J., dissenting"]
+    assert "delivered an opinion" in parts[0][1]
+    assert kind_of(parts[0][0]) == "plurality" and author_of(parts[0][0]) == "Scalia"
+    assert kind_of(parts[2][0]) == "dissent" and author_of(parts[2][0]) == "Breyer"
+
+
+def test_split_opinions_short_per_curiam():
+    pages = ["610 OCTOBER TERM, 2019\nSyllabus\nCOLORADO DEPT. OF STATE v. BACA\nNo. 19–518. Decided July 6, 2020\n"
+             "Per Curiam.\nThe judgment is reversed."]
+    _, parts = split_opinions(pages)
+    assert len(parts) == 1 and "reversed" in parts[0][1]
