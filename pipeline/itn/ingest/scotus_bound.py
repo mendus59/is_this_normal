@@ -94,7 +94,7 @@ def page_offset(numbers: list[int | None]) -> int | None:
 
 _DECIDED = re.compile(r"Decided ([A-Z][a-z]+ \d{1,2}, \d{4})")
 _DOCKET = re.compile(r"\bNos?\. (\d{1,2}[–-]\d{1,5}|\d{1,2}A\d{1,4})")
-GAP = ("2014-01-01", "2019-10-01")  # decision dates no other source fully covers
+GAP = ("2014-01-01", "2020-10-01")  # decision dates no other source fully covers
 # (case.law ends partway through volume 572, so the spring 2014 rulings in 573 need this)
 FIRST_VOLUME, LAST_VOLUME = 572, 591
 
@@ -121,8 +121,9 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
     # docket number and was skipped; it is now refiled under the bound volume's page.
     # v5: mixed-case opinion labels ("Breyer, J., dissenting") weren't recognized, so
     # pluralities and per curiams were skipped and dissents ran into the majority.
-    # This source's own cases are reloaded.
-    done = set(cursor.get("done_pdfs_v5", []))
+    # This source's own cases are reloaded. v6: the window now runs through OT2019
+    # (volumes 589-591), whose short per curiams the slip-opinion loader also missed.
+    done = set(cursor.get("done_pdfs_v6", []))
     count = 0
     with http.client(timeout=600) as client:
         names: dict[str, dict] = {}
@@ -184,7 +185,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                 if not starts:
                     print(f"  sample page: {texts[min(30, len(texts) - 1)][:300]!r}", flush=True)
                 done.add(url)
-                db.set_cursor(conn, SOURCE, {"done_pdfs_v5": sorted(done)})
+                db.set_cursor(conn, SOURCE, {"done_pdfs_v6": sorted(done)})
                 conn.commit()
     return count
 
