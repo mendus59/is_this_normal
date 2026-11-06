@@ -79,6 +79,45 @@ def contentious(votes: list[dict], threshold: float = CONTENTIOUS_THRESHOLD) -> 
                for v in votes if v["yeas"] + v["nays"] > 0)
 
 
+# Scope (2026-11-06): substantive laws, not only contentious ones. Most major laws pass
+# easily or by voice vote, so a close vote alone missed them. A law is in scope when it is
+# not ceremonial and either had a final-passage roll call under 90% yes or has a detailed
+# CRS summary. Whether a vote fell under two-thirds is still recorded as `contentious`.
+SCOPE_RULES_VERSION = 2
+ROLL_CALL_SHARE = 0.9
+SUBSTANTIVE_SUMMARY_CHARS = 1500
+CEREMONIAL_TITLE = re.compile(
+    r"post office|postal facility|to designate|to name |rename|commemorat|coin|gold medal|courthouse"
+    r"|land conveyance|to convey|memorial|national day|technical correction|clinic", re.IGNORECASE)
+
+
+def substantive(title: str | None, summary: str | None, votes: list[dict]) -> bool:
+    if CEREMONIAL_TITLE.search(title or ""):
+        return False
+    return contentious(votes, ROLL_CALL_SHARE) or len(summary or "") > SUBSTANTIVE_SUMMARY_CHARS
+
+
+def in_scope(enacted: str | None, title: str | None, summary: str | None, votes: list[dict]) -> bool:
+    return bool(enacted and str(enacted) >= SCOPE_START and substantive(title, summary, votes))
+
+
+def rescope(conn) -> int:
+    """Apply the current scope rules to laws already loaded, from stored metadata.
+    Runs once per SCOPE_RULES_VERSION. Returns how many laws are in scope."""
+    key = SOURCE + "_scope"
+    if (db.get_cursor(conn, key) or {}).get("version") == SCOPE_RULES_VERSION:
+        return -1
+    rows = conn.execute("SELECT id, title, official_summary, effective_date, metadata->'votes'"
+                        " FROM artifact WHERE type = 'public_law' AND id LIKE 'pl/%%'").fetchall()
+    keep = [r[0] for r in rows if in_scope(r[3], r[1], r[2], r[4] or [])]
+    conn.execute("UPDATE artifact SET in_scope = (id = ANY(%s)), updated_at = now()"
+                 " WHERE type = 'public_law' AND id LIKE 'pl/%%'", (keep,))
+    db.set_cursor(conn, key, {"version": SCOPE_RULES_VERSION, "in_scope": len(keep)})
+    conn.commit()
+    print(f"Laws rescoped (rules v{SCOPE_RULES_VERSION}): {len(keep)} in scope", flush=True)
+    return len(keep)
+
+
 def to_artifact(bill: dict, law_number: str, enacted: str | None, summary: str | None,
                 votes: list[dict]) -> dict:
     congress, number = law_number.split("-")
@@ -97,7 +136,7 @@ def to_artifact(bill: dict, law_number: str, enacted: str | None, summary: str |
         "subtype": "public_law",
         "title": bill.get("title") or f"Public Law {law_number}",
         "effective_date": enacted,
-        "in_scope": bool(enacted and enacted >= SCOPE_START and is_contentious),
+        "in_scope": in_scope(enacted, bill.get("title"), summary, votes),
         "closure_depth": 0,
         "sources": sources,
         "contentious": is_contentious,
@@ -177,6 +216,7 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
     the next run picks up where this one stopped."""
     key = require("DATA_GOV_API_KEY")
     deadline = time.monotonic() + max_minutes * 60
+    rescope(conn)
     cursor = db.get_cursor(conn, SOURCE) or {}
     latest = current_congress(dt.date.today().year)
     start = since_congress or cursor.get("next_congress") or FIRST_CONGRESS

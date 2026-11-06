@@ -67,3 +67,17 @@ def test_pre_2000_law_not_in_scope():
 def test_ordinal():
     from itn.ingest.congress_laws import ordinal
     assert [ordinal(n) for n in (111, 112, 113, 119, 121, 122, 123)] == ["111th", "112th", "113th", "119th", "121st", "122nd", "123rd"]
+
+
+def test_substantive_scope():
+    from itn.ingest.congress_laws import in_scope
+    long_summary = "x" * 2000
+    # Major law passed by voice vote with a detailed CRS summary.
+    assert in_scope("2008-10-03", "Emergency Economic Stabilization Act", long_summary, [])
+    # Roll call between two-thirds and 90% yes.
+    assert in_scope("2010-01-01", "Some Act", "short", [{"yeas": 350, "nays": 70}])
+    # Lopsided roll call and a short summary: routine.
+    assert not in_scope("2010-01-01", "Some Act", "short", [{"yeas": 410, "nays": 5}])
+    # Ceremonial titles stay out even with a split vote.
+    assert not in_scope("2010-01-01", "To designate the facility of the United States Postal Service", long_summary,
+                        [{"yeas": 200, "nays": 190}])
