@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from itn.analyze.presort import routine_reason
-from itn.extract.citations import extract
+from itn.extract.citations import extract, extract_statutes
 
 CHARS_PER_TOKEN = 4
 # $ per million tokens (input, output). Haiku's rate rises above 100K input tokens.
@@ -24,11 +24,11 @@ TIERS = ["haiku", "sonnet", "opus"]
 PROMPT = 2_000              # rubric and instructions per call
 SUMMARY_MAX_IN = 150_000
 SUMMARY_OUT = 800
-CHECK_IN, CHECK_OUT = 3_000, 300        # citing context + digest of the cited item
+CHECK_IN, CHECK_OUT = 2_000, 300        # citing context + the cited item's free syllabus or summary
 MAX_CHECKS_PER_ITEM = 60
 DIGEST_MAX_IN, DIGEST_OUT = 40_000, 1_500
 ANALOG_IN, ANALOG_OUT = 9_000, 1_500    # item summary + about 12 candidate summaries
-DIGESTS_IN_ASSESSMENT = 15
+DIGESTS_IN_ASSESSMENT = 15             # digests are written only for each item's most-cited authorities
 ASSESS_OUT = 3_000
 VERIFY_SHARE = 0.4                      # assumed share rated novel or unprecedented
 VERIFY_OUT = 2_000
@@ -54,7 +54,7 @@ class Item:
     type: str
     title: str
     text_tokens: int = 0
-    cited: list[str] = field(default_factory=list)   # distinct cited artifact ids
+    cited: list[str] = field(default_factory=list)   # distinct cited artifact ids, most cited first
     presort: str | None = None
 
 
@@ -89,7 +89,7 @@ def plan(items: list[Item], digest_sizes: dict[str, int], stages: dict, max_tier
         checks = min(len(it.cited), MAX_CHECKS_PER_ITEM)
         est.add("citation_check", checks, checks * cost(t["citation_check"], CHECK_IN, CHECK_OUT))
         loaded = [c for c in it.cited if c in digest_sizes]
-        need_digest.update(loaded)
+        need_digest.update(loaded[:DIGESTS_IN_ASSESSMENT])
         est.unloaded_cited += len(it.cited) - len(loaded)
         est.add("analog_assessment", 1, cost(t["analog_assessment"], ANALOG_IN, ANALOG_OUT))
         a_in = PROMPT + 1_000 + min(len(loaded), DIGESTS_IN_ASSESSMENT) * DIGEST_OUT + checks * 80 + ANALOG_OUT
@@ -139,10 +139,11 @@ def gather(conn, r2, ids: list[str]) -> tuple[list[Item], dict[str, int]]:
     for aid, n in _sizes(r2, keys).items():
         items[aid].text_tokens = n
     cites = conn.execute(
-        "SELECT DISTINCT f.artifact_id, c.to_artifact FROM citation c"
+        "SELECT f.artifact_id, c.to_artifact FROM citation c"
         " JOIN component f ON f.id = c.from_component"
         " WHERE f.artifact_id = ANY(%s) AND (f.kind = ANY(%s) OR NOT EXISTS ("
-        "   SELECT 1 FROM component g WHERE g.artifact_id = f.artifact_id AND g.kind = ANY(%s)))",
+        "   SELECT 1 FROM component g WHERE g.artifact_id = f.artifact_id AND g.kind = ANY(%s)))"
+        " GROUP BY 1, 2 ORDER BY 1, count(*) DESC, 2",
         (list(items), list(CONTROLLING), list(CONTROLLING))).fetchall()
     for aid, to in cites:
         items[aid].cited.append(to)
@@ -151,7 +152,8 @@ def gather(conn, r2, ids: list[str]) -> tuple[list[Item], dict[str, int]]:
         if it.cited or it.presort or not keys.get(it.id):
             continue
         text = "\n".join(r2.get_text(k) or "" for k in keys[it.id])
-        it.cited = sorted({row["to_artifact"] for row in extract(text)} - {it.id})
+        order = extract_statutes(text) + [r["to_artifact"] for r in extract(text)]
+        it.cited = [c for c in dict.fromkeys(order) if c != it.id]
     cited = sorted({c for it in items.values() for c in it.cited})
     loaded = [r[0] for r in conn.execute("SELECT id FROM artifact WHERE id = ANY(%s)", (cited,)).fetchall()]
     conn.commit()
