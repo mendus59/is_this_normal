@@ -144,11 +144,18 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                     for want in dbg:
                         for i, n in enumerate(nums):
                             if n is not None and abs(n - want) <= 1:
-                                print(f"=== {url} idx {i} printed {n} start={case_start(texts[i])}", flush=True)
-                                print("\n".join(texts[i].splitlines()[:25]), flush=True)
+                                c = case_start(texts[i])
+                                print(f"=== {url} idx {i} printed {n} start={c}", flush=True)
+                                if c:
+                                    rows = conn.execute("SELECT id, closure_depth, metadata->>'source', metadata->>'docket_number', metadata ? 'opinions' FROM artifact WHERE id = %s OR id = %s OR regexp_replace(metadata->>'docket_number', '^No\\.?\\s*', '') = %s", (ids.scotus_docket(c['docket']), ids.scotus_case(vol, str(n)), c['docket'])).fetchall()
+                                    conn.commit()
+                                    print(f"MATCHES {rows}", flush=True)
+                                    starts_all = [j for j, t in enumerate(texts) if case_start(t)]
+                                    end = next((j for j in starts_all if j > i), len(texts))
+                                    syl, parts = sc.split_opinions(texts[i:end])
+                                    print(f"PARTS end={end} {[(lb, len(tx)) for lb, tx in parts]}", flush=True)
                                 if i + 1 < len(texts) and nums[i + 1] is None:
                                     print(f"--- idx {i+1} (no page number) start={case_start(texts[i+1])}", flush=True)
-                                    print("\n".join(texts[i + 1].splitlines()[:25]), flush=True)
                     continue
                 if __import__("os").environ.get("DEBUG_PAGES"):
                     continue
