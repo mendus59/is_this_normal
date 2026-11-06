@@ -119,6 +119,7 @@ def _keys(conn, ids: list[str]) -> dict[str, list[str]]:
                                  " AND text_key IS NOT NULL", (ids,)).fetchall():
         if not out.get(aid):
             out[aid] = [key]
+    conn.commit()  # R2 reads follow; don't hold a transaction open while they run
     return out
 
 
@@ -135,6 +136,7 @@ def gather(conn, r2, ids: list[str]) -> tuple[list[Item], dict[str, int]]:
     items = {r[0]: Item(id=r[0], type=r[1], title=r[3],
                         presort=routine_reason(r[2], r[3]) if r[1] == "executive_document" else None)
              for r in rows}
+    conn.commit()
     keys = _keys(conn, list(items))
     for aid, n in _sizes(r2, keys).items():
         items[aid].text_tokens = n
@@ -145,6 +147,7 @@ def gather(conn, r2, ids: list[str]) -> tuple[list[Item], dict[str, int]]:
         "   SELECT 1 FROM component g WHERE g.artifact_id = f.artifact_id AND g.kind = ANY(%s)))"
         " GROUP BY 1, 2 ORDER BY 1, count(*) DESC, 2",
         (list(items), list(CONTROLLING), list(CONTROLLING))).fetchall()
+    conn.commit()
     for aid, to in cites:
         items[aid].cited.append(to)
     # Executive documents and laws have no extracted citations yet: read them from the text.
