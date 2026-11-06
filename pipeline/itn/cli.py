@@ -95,6 +95,21 @@ STATUS_QUERIES = [
      " LEFT JOIN artifact a ON a.id = c.to_artifact"
      " WHERE c.to_artifact ~ '^scotus/(57[4-9]|5[89][0-9]|6[0-9][0-9])-us-[0-9]+$' AND a.id IS NULL"
      " AND split_part(c.to_artifact, '-us-', 2)::int < 900) s ORDER BY random() LIMIT 15"),
+    ("Cited 2015+ opinion pages not loaded, with the nearest loaded case in that volume",
+     "WITH miss AS (SELECT DISTINCT c.to_artifact AS t,"
+     " split_part(split_part(c.to_artifact, '/', 2), '-', 1)::int AS vol,"
+     " split_part(c.to_artifact, '-us-', 2)::int AS page FROM citation c"
+     " JOIN component f ON f.id = c.from_component"
+     " JOIN artifact src ON src.id = f.artifact_id AND src.closure_depth = 0"
+     " LEFT JOIN artifact a ON a.id = c.to_artifact"
+     " WHERE c.to_artifact ~ '^scotus/(57[4-9]|5[89][0-9]|6[0-9][0-9])-us-[0-9]+$' AND a.id IS NULL"
+     " AND split_part(c.to_artifact, '-us-', 2)::int < 900),"
+     " have AS (SELECT id, split_part(split_part(id, '/', 2), '-', 1)::int AS vol,"
+     " split_part(id, '-us-', 2)::int AS page, title FROM artifact"
+     " WHERE type = 'scotus_case' AND id ~ '^scotus/[0-9]+-us-[0-9]+$')"
+     " SELECT m.t, n.id, n.page - m.page, left(n.title, 50) FROM miss m"
+     " LEFT JOIN LATERAL (SELECT h.id, h.page, h.title FROM have h WHERE h.vol = m.vol"
+     " ORDER BY abs(h.page - m.page) LIMIT 1) n ON true ORDER BY m.vol, m.page"),
     ("Ingest cursors", "SELECT source, left(cursor::text, 200) FROM ingest_cursor ORDER BY source"),
 ]
 
