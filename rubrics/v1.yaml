@@ -1,0 +1,87 @@
+# Scoring rubric, version 1 (approved choices 2026-11-06).
+# Changing anything here means bumping `version`; cached analyses keyed to the old
+# version are then re-run only for the stages that use the changed part.
+version: 1
+
+scale:
+  4: {band: routine, meaning: "Squarely follows settled practice; many close analogs"}
+  3: {band: ordinary, meaning: "A small, well-supported step from settled practice"}
+  2: {band: unusual, meaning: "A clear departure that still has some support"}
+  1: {band: novel, meaning: "First of its kind in an important respect; little support"}
+  0: {band: unprecedented, meaning: "Contrary to, or wholly outside, prior practice"}
+
+as_of: day_before_effective_date   # enforced by the data tools, not only the prompt
+
+evidence:
+  min_per_rating: 1                # artifact ids from the corpus, dated on or before as_of
+  missing: insufficient            # recorded as insufficient; lowers confidence, no guess
+
+# Percentiles are ranked within each type, not across all types.
+percentile_pool: within_type
+bands: {routine: 80, ordinary: 60, unusual: 40, novel: 20, unprecedented: 0}
+
+# Same actor: a court (same membership), a president, or a Congress cannot make its
+# own actions normal by repeating them.
+#  - Its own earlier actions count at `weight` when the model weighs analogs and precedent.
+#  - Each rating also has `rating_independent`: the rating using only other actors'
+#    evidence. When a rating relies on the actor's own earlier, already scored items,
+#    the final rating is min(rating, max(lowest rating among those items,
+#    rating_independent)). So an unprecedented first order followed by two near copies
+#    makes all three unprecedented, unless other actors' history supports them.
+same_actor:
+  weight: 0.25
+  actor:
+    scotus_case: natural_court     # same nine (or eight) justices
+    executive_document: president
+    public_law: congress
+  applies_to: [precedent, method, analogs, authority]
+
+# A citation check verdict of contradicts/mischaracterized that both passes agree on is
+# evidence in the dimension that relies on that citation, and is also published as a flag.
+# It is never a separate penalty.
+citation_flags: {use_as: evidence, publish_flag: true, require_two_passes: true}
+
+weights: equal                     # version 1; tuned against calibration anchors later
+
+verification:
+  second_pass_bands: [novel, unprecedented]
+  model_tier: opus
+
+types:
+  scotus_case:
+    scored_part: controlling_opinion   # concurrences/dissents are context and evidence only
+    dimensions:
+      precedent: "Does it follow, extend, narrow or overrule the Court's own cases as of that day?"
+      text: "How closely does the holding track the constitutional or statutory text it construes?"
+      method: "Does the Court apply its interpretive tests the way its recent cases did?"
+      procedure: "Is the path ordinary (not emergency docket, cert before judgment, a question not presented, issues reached sua sponte)?"
+      reach: "How much settled law changes: how many earlier cases or statutes are undermined?"
+  executive_document:
+    presort: routine_templates         # see itn.analyze.presort; no model call
+    analog_window_start: "2000-01-01"  # older actions the document cites are extra evidence
+    dimensions:
+      authority: "Does the statute or constitutional power it cites, read as of that day, support it?"
+      analogs: "How many earlier actions by any president did the same kind of thing?"
+      scope: "How large is its effect compared with those analogs?"
+      procedure: "Does it use ordinary channels (not emergency powers, bypassed notice and comment, an overridden statutory process)?"
+      conflict: "Does it conflict with a statute or a court order in force that day?"
+  public_law:
+    shown_not_scored: [party_line_vote]
+    dimensions:
+      process: "Did it move through regular order (not reconciliation, an omnibus vehicle, skipped committees, very fast passage)?"
+      footing: "Is the constitutional power it relies on well supported by the Court's cases as of that day?"
+      scope: "How much of the U.S. Code does it change, compared with other laws?"
+      analogs: "Have earlier laws done the same thing in the same area?"
+
+models:
+  haiku: claude-haiku-5-5
+  sonnet: claude-sonnet-5-5
+  opus: claude-opus-5-5
+
+stages:
+  summary: haiku
+  citation_check: haiku
+  authority_digest: sonnet
+  analog_assessment: sonnet
+  type_assessment: sonnet
+  verification: opus

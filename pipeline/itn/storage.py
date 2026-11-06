@@ -59,3 +59,17 @@ class R2:
     def put_bytes(self, key: str, body: bytes, content_type: str, digest: str) -> None:
         self.client.put_object(Bucket=self.settings.bucket, Key=key, Body=body,
                                ContentType=content_type, Metadata={"sha256": digest})
+
+    def get_text(self, key: str) -> str | None:
+        try:
+            obj = self.client.get_object(Bucket=self.settings.bucket, Key=key)
+        except self.client.exceptions.ClientError:
+            return None
+        return obj["Body"].read().decode("utf-8", "replace")
+
+    def size(self, key: str) -> int:
+        """Stored size in bytes, or 0 when the object is missing."""
+        try:
+            return self.client.head_object(Bucket=self.settings.bucket, Key=key)["ContentLength"]
+        except self.client.exceptions.ClientError:
+            return 0
