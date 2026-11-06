@@ -159,45 +159,51 @@ def _dry_run(args) -> None:
     rubric = load_rubric()
     stages, out = rubric["stages"], []
     r2 = R2()
-    with db.connect() as conn:
-        if args.pilot:
-            anchors = load_anchors()
-            ids, missing = [], []
-            for typ in ("scotus_case", "executive_document", "public_law"):
-                for a in anchors.get(typ, []):
-                    aid = est.resolve_anchor(conn, typ, a)
-                    (ids.append(aid) if aid else missing.append(f"{typ}: {a.get('id') or a.get('title')}"))
-            conn.commit()
+    if args.pilot:
+        anchors = load_anchors()
+        ids, missing = [], []
+        conn = db.connect()
+        for typ in ("scotus_case", "executive_document", "public_law"):
+            for a in anchors.get(typ, []):
+                aid = est.resolve_anchor(conn, typ, a)
+                (ids.append(aid) if aid else missing.append(f"{typ}: {a.get('id') or a.get('title')}"))
+        conn.commit()
+        items, sizes = est.gather(conn, r2, ids)
+        out += est.report(f"Pilot: {len(ids)} calibration anchors (rubric v{rubric['version']},"
+                          f" max tier {args.max_tier})", est.plan(items, sizes, stages, args.max_tier))
+        for it in items:
+            tag = f"  [routine: {it.presort}]" if it.presort else ""
+            out.append(f"    {it.id:28} {it.text_tokens:>8,} tok  {len(it.cited):>3} cites  {it.title[:60]}{tag}")
+        if missing:
+            out.append("  Anchors not found (left out): " + "; ".join(missing))
+        print("\n".join(out), flush=True)
+        out = []
+    if args.sample:
+        grand = 0.0
+        for typ in ("scotus_case", "executive_document", "public_law"):
+            conn = db.connect()  # each phase can outlast the database's idle timeout
+            ids, total = est.sample_ids(conn, typ, args.sample)
             items, sizes = est.gather(conn, r2, ids)
-            out += est.report(f"Pilot: {len(ids)} calibration anchors (rubric v{rubric['version']},"
-                              f" max tier {args.max_tier})", est.plan(items, sizes, stages, args.max_tier))
-            for it in items:
-                tag = f"  [routine: {it.presort}]" if it.presort else ""
-                out.append(f"    {it.id:28} {it.text_tokens:>8,} tok  {len(it.cited):>3} cites  {it.title[:60]}{tag}")
-            if missing:
-                out.append("  Anchors not found (left out): " + "; ".join(missing))
-        if args.sample:
-            grand = 0.0
-            for typ in ("scotus_case", "executive_document", "public_law"):
-                ids, total = est.sample_ids(conn, typ, args.sample)
-                items, sizes = est.gather(conn, r2, ids)
-                e = est.plan(items, sizes, stages, args.max_tier)
-                scale = total / max(len(items), 1)
-                for k in e.usd:
-                    e.usd[k] *= scale
-                    e.calls[k] *= scale
-                e.unloaded_cited = int(e.unloaded_cited * scale)
-                e.digests = int(e.digests * scale)
-                out += est.report(f"All {total:,} in-scope {typ} (scaled from a sample of {len(items)};"
-                                  " digests overcounted because shared precedents are counted once per sample item set)", e)
-                grand += e.total
-            lo, hi = est.RANGE
-            out.append(f"== Full corpus, all types: ${grand:,.2f} (range ${grand * lo:,.2f} to ${grand * hi:,.2f};"
-                       f" Batch API about half)")
-        if not args.pilot and not args.sample:
-            ids = _scope_ids(conn, args)
-            items, sizes = est.gather(conn, r2, ids)
-            out += est.report(f"Scope: {len(ids)} items", est.plan(items, sizes, stages, args.max_tier))
+            e = est.plan(items, sizes, stages, args.max_tier)
+            scale = total / max(len(items), 1)
+            for k in e.usd:
+                e.usd[k] *= scale
+                e.calls[k] *= scale
+            e.unloaded_cited = int(e.unloaded_cited * scale)
+            e.digests = int(e.digests * scale)
+            out += est.report(f"All {total:,} in-scope {typ} (scaled from a sample of {len(items)};"
+                              " digests overcounted because shared precedents are counted once per sample item set)", e)
+            grand += e.total
+            print("\n".join(out), flush=True)
+            out = []
+        lo, hi = est.RANGE
+        out.append(f"== Full corpus, all types: ${grand:,.2f} (range ${grand * lo:,.2f} to ${grand * hi:,.2f};"
+                   f" Batch API about half)")
+    if not args.pilot and not args.sample:
+        conn = db.connect()
+        ids = _scope_ids(conn, args)
+        items, sizes = est.gather(conn, r2, ids)
+        out += est.report(f"Scope: {len(ids)} items", est.plan(items, sizes, stages, args.max_tier))
     print("\n".join(out))
     print("\nDry run: no model was called and nothing was spent. Prices are the published rates as of"
           " 2026-10-06; token counts are approximate.")
