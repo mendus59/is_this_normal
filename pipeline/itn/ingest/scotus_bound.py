@@ -136,6 +136,22 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
         pdfs = volume_pdfs(resp.text, str(resp.url))
         for vol in sorted(v for v in pdfs if FIRST_VOLUME <= int(v) <= LAST_VOLUME):
             for url in pdfs[vol]:
+                dbg = {int(p.split(":")[1]) for p in __import__("os").environ.get("DEBUG_PAGES", "").split(",") if p.startswith(vol + ":")}
+                if dbg:
+                    pdf = get(client, url)
+                    texts = [p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf.content)).pages]
+                    nums = [page_number(t) for t in texts]
+                    for want in dbg:
+                        for i, n in enumerate(nums):
+                            if n is not None and abs(n - want) <= 1:
+                                print(f"=== {url} idx {i} printed {n} start={case_start(texts[i])}", flush=True)
+                                print("\n".join(texts[i].splitlines()[:25]), flush=True)
+                                if i + 1 < len(texts) and nums[i + 1] is None:
+                                    print(f"--- idx {i+1} (no page number) start={case_start(texts[i+1])}", flush=True)
+                                    print("\n".join(texts[i + 1].splitlines()[:25]), flush=True)
+                    continue
+                if __import__("os").environ.get("DEBUG_PAGES"):
+                    continue
                 if url in done:
                     continue
                 if time.monotonic() > deadline:

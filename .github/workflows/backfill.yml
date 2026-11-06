@@ -29,6 +29,7 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       COURTLISTENER_TOKEN: ${{ secrets.COURTLISTENER_TOKEN }}
       SOURCE: ${{ matrix.source }}
+      DEBUG_PAGES: "576:86,588:634,591:610,580:238"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
