@@ -79,13 +79,22 @@ STATUS_QUERIES = [
      "SELECT id, effective_date, left(title, 80), metadata->>'opinions', metadata->>'source'"
      " FROM artifact WHERE type = 'scotus_case' AND id LIKE 'scotus/docket-%%'"
      " ORDER BY random() LIMIT 20"),
-    ("Sample of cited 2015+ cases not loaded",
-     "SELECT DISTINCT c.to_artifact, left(c.raw_text, 80) FROM citation c"
+    ("Cited 2015+ cases not loaded: opinion pages vs orders pages (page 900 and up)",
+     "SELECT CASE WHEN split_part(c.to_artifact, '-us-', 2)::int >= 900 THEN 'orders pages'"
+     " ELSE 'opinion pages' END, count(DISTINCT c.to_artifact) FROM citation c"
      " JOIN component f ON f.id = c.from_component"
      " JOIN artifact src ON src.id = f.artifact_id AND src.closure_depth = 0"
      " LEFT JOIN artifact a ON a.id = c.to_artifact"
      " WHERE c.to_artifact ~ '^scotus/(57[3-9]|5[89][0-9]|6[0-9][0-9])-us-[0-9]+$' AND a.id IS NULL"
-     " LIMIT 25"),
+     " GROUP BY 1"),
+    ("Sample of cited 2015+ opinion pages not loaded",
+     "SELECT t, raw FROM (SELECT DISTINCT ON (c.to_artifact) c.to_artifact AS t,"
+     " left(c.context_snippet, 160) AS raw FROM citation c"
+     " JOIN component f ON f.id = c.from_component"
+     " JOIN artifact src ON src.id = f.artifact_id AND src.closure_depth = 0"
+     " LEFT JOIN artifact a ON a.id = c.to_artifact"
+     " WHERE c.to_artifact ~ '^scotus/(57[4-9]|5[89][0-9]|6[0-9][0-9])-us-[0-9]+$' AND a.id IS NULL"
+     " AND split_part(c.to_artifact, '-us-', 2)::int < 900) s ORDER BY random() LIMIT 15"),
     ("Ingest cursors", "SELECT source, left(cursor::text, 200) FROM ingest_cursor ORDER BY source"),
 ]
 
