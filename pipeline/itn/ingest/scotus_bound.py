@@ -117,7 +117,9 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
     deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
     # v2: page numbers were read from the wrong part of the running head before.
-    done = set(cursor.get("done_pdfs_v2", []))
+    # v3: orders-list entries CourtListener had loaded matched real cases by docket
+    # number, so those cases were skipped as already loaded (Kerry v. Din and others).
+    done = set(cursor.get("done_pdfs_v3", []))
     count = 0
     with http.client(timeout=600) as client:
         names: dict[str, dict] = {}
@@ -177,7 +179,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                 if not starts:
                     print(f"  sample page: {texts[min(30, len(texts) - 1)][:300]!r}", flush=True)
                 done.add(url)
-                db.set_cursor(conn, SOURCE, {"done_pdfs_v2": sorted(done)})
+                db.set_cursor(conn, SOURCE, {"done_pdfs_v3": sorted(done)})
                 conn.commit()
     return count
 
