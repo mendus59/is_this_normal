@@ -110,6 +110,17 @@ STATUS_QUERIES = [
      " SELECT m.t, n.id, n.page - m.page, left(n.title, 50) FROM miss m"
      " LEFT JOIN LATERAL (SELECT h.id, h.page, h.title FROM have h WHERE h.vol = m.vol"
      " ORDER BY abs(h.page - m.page) LIMIT 1) n ON true ORDER BY m.vol, m.page"),
+    ("Laws since 2000 by lowest final-passage yes share | ceremonial title | count | with CRS summary over 1,500 chars",
+     "WITH l AS (SELECT id, title, length(coalesce(official_summary, '')) AS slen,"
+     " (SELECT min((v->>'yeas')::float / nullif((v->>'yeas')::int + (v->>'nays')::int, 0))"
+     "  FROM jsonb_array_elements(coalesce(metadata->'votes', '[]'::jsonb)) v) AS share"
+     " FROM artifact WHERE type = 'public_law' AND effective_date >= '2000-01-01')"
+     " SELECT CASE WHEN share IS NULL THEN '0 no roll call' WHEN share < 0.6 THEN '1 under 60%%'"
+     " WHEN share < 2.0/3 THEN '2 60-67%%' WHEN share < 0.8 THEN '3 67-80%%' WHEN share < 0.9 THEN '4 80-90%%'"
+     " ELSE '5 90%%+' END,"
+     " title ~* '(post office|postal facility|to designate|to name |rename|commemorat|coin|gold medal|courthouse"
+     "|land conveyance|to convey|memorial|national day|technical correction|clinic)',"
+     " count(*), count(*) FILTER (WHERE slen > 1500) FROM l GROUP BY 1, 2 ORDER BY 1, 2"),
     ("Ingest cursors", "SELECT source, left(cursor::text, 200) FROM ingest_cursor ORDER BY source"),
 ]
 
