@@ -9,6 +9,7 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from itn import db
 from itn.analyze.presort import routine_reason
 from itn.extract.citations import extract, extract_statutes
 
@@ -33,6 +34,7 @@ ASSESS_OUT = 3_000
 VERIFY_SHARE = 0.4                      # assumed share rated novel or unprecedented
 VERIFY_OUT = 2_000
 RANGE = (0.7, 1.6)
+EYECITE_MAX_CHARS = 300_000
 
 CONTROLLING = {"majority", "plurality", "unanimous", "opinion", "per_curiam", "lead", "syllabus"}
 
@@ -151,16 +153,24 @@ def gather(conn, r2, ids: list[str]) -> tuple[list[Item], dict[str, int]]:
     for aid, to in cites:
         items[aid].cited.append(to)
     # Executive documents and laws have no extracted citations yet: read them from the text.
-    for it in items.values():
-        if it.cited or it.presort or not keys.get(it.id):
-            continue
+    todo = [it for it in items.values() if not (it.cited or it.presort or not keys.get(it.id))]
+
+    def cites_in(it: Item) -> list[str]:
         text = "\n".join(r2.get_text(k) or "" for k in keys[it.id])
-        order = extract_statutes(text) + [r["to_artifact"] for r in extract(text)]
-        it.cited = [c for c in dict.fromkeys(order) if c != it.id]
+        order = extract_statutes(text)
+        if len(text) <= EYECITE_MAX_CHARS:  # eyecite takes minutes on omnibus laws
+            order += [r["to_artifact"] for r in extract(text)]
+        return [c for c in dict.fromkeys(order) if c != it.id]
+
+    with ThreadPoolExecutor(8) as pool:
+        for it, found in zip(todo, pool.map(cites_in, todo)):
+            it.cited = found
     cited = sorted({c for it in items.values() for c in it.cited})
-    loaded = [r[0] for r in conn.execute("SELECT id FROM artifact WHERE id = ANY(%s)", (cited,)).fetchall()]
-    conn.commit()
-    digest_sizes = _sizes(r2, _keys(conn, loaded)) if loaded else {}
+    # The reads above can outlast the database's idle timeout, so use a fresh connection.
+    with db.connect() as fresh:
+        loaded = [r[0] for r in fresh.execute("SELECT id FROM artifact WHERE id = ANY(%s)", (cited,)).fetchall()]
+        loaded_keys = _keys(fresh, loaded) if loaded else {}
+    digest_sizes = _sizes(r2, loaded_keys) if loaded else {}
     return [items[i] for i in ids if i in items], digest_sizes
 
 
