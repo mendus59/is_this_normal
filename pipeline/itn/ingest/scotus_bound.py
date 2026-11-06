@@ -117,7 +117,9 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
     deadline = time.monotonic() + max_minutes * 60
     cursor = db.get_cursor(conn, SOURCE) or {}
     # v2: page numbers were read from the wrong part of the running head before.
-    done = set(cursor.get("done_pdfs_v2", []))
+    # v4: a case loaded under a wrong U.S. Reports page by another source matched by
+    # docket number and was skipped; it is now refiled under the bound volume's page.
+    done = set(cursor.get("done_pdfs_v4", []))
     count = 0
     with http.client(timeout=600) as client:
         names: dict[str, dict] = {}
@@ -158,6 +160,8 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                     cite = (vol, str(page)) if page and page > 0 else None
                     drop_misfiled(conn, case["docket"], ids.scotus_case(*cite) if cite else None)
                     sc.claim_cite(conn, case["docket"], cite)
+                    if cite:
+                        refile(conn, case["docket"], cite)
                     if sc.already_loaded(conn, case["docket"], cite):
                         continue
                     end = starts[k + 1][0] if k + 1 < len(starts) else len(texts)
@@ -177,7 +181,7 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                 if not starts:
                     print(f"  sample page: {texts[min(30, len(texts) - 1)][:300]!r}", flush=True)
                 done.add(url)
-                db.set_cursor(conn, SOURCE, {"done_pdfs_v2": sorted(done)})
+                db.set_cursor(conn, SOURCE, {"done_pdfs_v4": sorted(done)})
                 conn.commit()
     return count
 
@@ -195,6 +199,21 @@ def drop_misfiled(conn, docket: str, right_id: str | None) -> None:
 
 
 BOUND_SOURCE = "supremecourt.gov U.S. Reports"
+
+
+def refile(conn, docket: str, cite: tuple[str, str]) -> None:
+    """Move a case another source filed under a different U.S. Reports page to the page
+    its bound volume prints. The bound volume is the official citation."""
+    right = ids.scotus_case(*cite)
+    rows = conn.execute(
+        "SELECT id FROM artifact WHERE type = 'scotus_case' AND id ~ '^scotus/[0-9]+-us-[0-9]+$'"
+        " AND id <> %s AND regexp_replace(metadata->>'docket_number', '^Nos?\\.?\\s*', '') = %s",
+        (right, docket)).fetchall()
+    conn.commit()
+    for (old,) in rows:
+        result = db.rekey_artifact(conn, old, right, {"us_cite": f"{cite[0]} U.S. {cite[1]}"})
+        conn.commit()
+        print(f"Refiled {docket}: {old} {result} -> {right}", flush=True)
 
 
 def load(conn, r2, fetch_text: bool, row: dict, syllabus, parts):
