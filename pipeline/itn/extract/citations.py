@@ -55,3 +55,17 @@ def extract(text: str, citing_date: str | None = None) -> list[dict]:
             "citing_date": citing_date,
         })
     return rows
+
+
+# Federal Register documents and enrolled laws cite the Code as "8 U.S.C. 1182(f)",
+# without the section sign eyecite expects.
+_BARE_USC = re.compile(r"\b(\d{1,2})\s+U\.\s?S\.\s?C\.\s+(?:§+\s*)?(\d+[a-z]?(?:-\d+[a-z]?)?)")
+
+
+def extract_statutes(text: str) -> list[str]:
+    """U.S. Code section ids cited in text, most cited first, including bare forms."""
+    counts: dict[str, int] = {}
+    for m in _BARE_USC.finditer(text or ""):
+        aid = ids.usc_section(m.group(1), m.group(2))
+        counts[aid] = counts.get(aid, 0) + 1
+    return sorted(counts, key=lambda a: (-counts[a], a))

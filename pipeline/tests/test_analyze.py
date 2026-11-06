@@ -68,3 +68,17 @@ def test_percentiles_ranked_within_type():
     types = {"s1": "scotus_case", "s2": "scotus_case", "e1": "executive_document", "e2": "executive_document"}
     p = percentiles_by_type(raw, types)
     assert p["s2"] == 100 and p["e2"] == 100 and p["e1"] == 0
+
+
+def test_bare_usc_citations_found_most_cited_first():
+    from itn.extract.citations import extract_statutes
+    text = ("by section 212(f) of the INA, 8 U.S.C. 1182(f), and 8 U.S.C. 1185(a), and "
+            "section 301 of title 3, United States Code; see 8 U.S.C. 1182(f).")
+    assert extract_statutes(text) == ["usc/8/1182", "usc/8/1185"]
+
+
+def test_digests_limited_to_most_cited_per_item():
+    many = [f"x{i}" for i in range(40)]
+    e = est.plan([est.Item("a", "scotus_case", "A", 1_000, many)], {c: 1_000 for c in many},
+                 load_rubric()["stages"], "opus")
+    assert e.digests == est.DIGESTS_IN_ASSESSMENT
