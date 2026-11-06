@@ -73,7 +73,7 @@ def parse_term_table(page: str, base: str = f"{SITE}/opinions/slipopinion/") -> 
         i = cells.index(docket)
         url = urljoin(base, pdf.group(1))
         row = {"date": dt.date(y if y >= 100 else 2000 + y, m, d).isoformat(), "docket": docket,
-               "name": cells[i + 1] if i + 1 < len(cells) else docket,
+               "name": clean_name(cells[i + 1]) if i + 1 < len(cells) else docket,
                "pdf": url}
         if pdf.group(2):
             row["page"] = int(pdf.group(2))
@@ -82,6 +82,14 @@ def parse_term_table(page: str, base: str = f"{SITE}/opinions/slipopinion/") -> 
             row["us_cite"] = (cite.group(1), cite.group(2))
         rows.append(row)
     return rows
+
+
+_REVISIONS = re.compile(r"\s*Revisions?\s*:.*$", re.IGNORECASE)
+
+
+def clean_name(name: str) -> str:
+    """Drop the "Revisions: 7/01/26" note the opinions table appends to revised cases."""
+    return _REVISIONS.sub("", name).strip()
 
 
 def kind_of(label: str) -> str:
@@ -256,6 +264,10 @@ def describe_unparsed(page: str) -> str:
 def run(conn, r2=None, since_term: int | None = None, fetch_text: bool = True,
         max_minutes: float = 95, **_) -> int:
     deadline = time.monotonic() + max_minutes * 60
+    # Cases loaded before clean_name existed may still carry a revision note.
+    conn.execute("UPDATE artifact SET title = regexp_replace(title, '\\s*Revisions?\\s*:.*$', '', 'i')"
+                 " WHERE type = 'scotus_case' AND title ~* 'Revisions?\\s*:'")
+    conn.commit()
     cursor = db.get_cursor(conn, SOURCE) or {}
     current = term_of(dt.date.today())
     start = since_term or cursor.get("next_term_v2", FIRST_TERM)
