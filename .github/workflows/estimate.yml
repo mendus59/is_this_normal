@@ -1,0 +1,44 @@
+# Free: estimates what a scoring run would cost. Calls no model; has no API key and
+# does not use the `paid` environment.
+name: Estimate analysis cost
+on:
+  workflow_dispatch:
+    inputs:
+      pilot:
+        description: "Estimate the calibration anchors (the pilot)"
+        type: boolean
+        default: true
+      sample:
+        description: "Also estimate every in-scope item from a sample of this many per type (0 = skip)"
+        default: "100"
+      max_tier:
+        description: "Most capable model allowed"
+        type: choice
+        options: [haiku, sonnet, opus]
+        default: opus
+
+concurrency: pipeline
+
+jobs:
+  estimate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+      - run: pip install ./pipeline
+      - name: Dry run
+        run: |
+          args=(--dry-run --max-tier "${{ inputs.max_tier }}" --sample "${{ inputs.sample }}")
+          [ "${{ inputs.pilot }}" = "true" ] && args+=(--pilot)
+          itn analyze "${args[@]}"

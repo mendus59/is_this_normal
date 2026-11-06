@@ -20,6 +20,17 @@ def band(percentile: float) -> str:
     return next(name for floor, name in BANDS if percentile >= floor)
 
 
+def percentiles_by_type(raw_scores: dict[str, float], types: dict[str, str]) -> dict[str, float]:
+    """Percentiles ranked within each artifact type (rubric v1: percentile_pool within_type)."""
+    pools: dict[str, dict[str, float]] = {}
+    for aid, raw in raw_scores.items():
+        pools.setdefault(types[aid], {})[aid] = raw
+    out: dict[str, float] = {}
+    for pool in pools.values():
+        out.update(percentiles(pool))
+    return out
+
+
 def percentiles(raw_scores: dict[str, float]) -> dict[str, float]:
     """Percentile of each raw score among all scores (0-100, higher = more normal)."""
     ordered = sorted(raw_scores.values())
@@ -43,7 +54,7 @@ def build_catalog(conn) -> list[dict]:
         """
     ).fetchall()
     raw = {r[0]: r[9] for r in rows if r[9] is not None}
-    pct = percentiles(raw)
+    pct = percentiles_by_type(raw, {r[0]: r[1] for r in rows})
     catalog = []
     for (aid, typ, subtype, title, date, in_scope, contentious, summary, sources, _raw, conf) in rows:
         entry = {

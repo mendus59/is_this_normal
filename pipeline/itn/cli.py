@@ -124,13 +124,87 @@ def cmd_status(args) -> None:
         conn.commit()
 
 
+def _scope_ids(conn, args) -> list[str]:
+    q, params = "SELECT id FROM artifact WHERE in_scope", []
+    if args.ids:
+        q += " AND id = ANY(%s)"; params.append(args.ids)
+    if args.type:
+        q += " AND type = %s"; params.append(args.type)
+    if args.years:
+        lo, _, hi = args.years.partition("-")
+        q += " AND extract(year FROM effective_date) BETWEEN %s AND %s"; params += [int(lo), int(hi or lo)]
+    if args.unscored:
+        q += " AND NOT EXISTS (SELECT 1 FROM score s WHERE s.artifact_id = artifact.id AND s.current)"
+    rows = conn.execute(q + " ORDER BY effective_date, id", params).fetchall()
+    conn.commit()
+    return [r[0] for r in rows]
+
+
+def _dry_run(args) -> None:
+    from itn.analyze import estimate as est
+    from itn.analyze.rubric import load_anchors, load_rubric
+    from itn.storage import R2
+
+    rubric = load_rubric()
+    stages, out = rubric["stages"], []
+    r2 = R2()
+    with db.connect() as conn:
+        if args.pilot:
+            anchors = load_anchors()
+            ids, missing = [], []
+            for typ in ("scotus_case", "executive_document", "public_law"):
+                for a in anchors.get(typ, []):
+                    aid = est.resolve_anchor(conn, typ, a)
+                    (ids.append(aid) if aid else missing.append(f"{typ}: {a.get('id') or a.get('title')}"))
+            conn.commit()
+            items, sizes = est.gather(conn, r2, ids)
+            out += est.report(f"Pilot: {len(ids)} calibration anchors (rubric v{rubric['version']},"
+                              f" max tier {args.max_tier})", est.plan(items, sizes, stages, args.max_tier))
+            for it in items:
+                tag = f"  [routine: {it.presort}]" if it.presort else ""
+                out.append(f"    {it.id:28} {it.text_tokens:>8,} tok  {len(it.cited):>3} cites  {it.title[:60]}{tag}")
+            if missing:
+                out.append("  Anchors not found (left out): " + "; ".join(missing))
+        if args.sample:
+            grand = 0.0
+            for typ in ("scotus_case", "executive_document", "public_law"):
+                ids, total = est.sample_ids(conn, typ, args.sample)
+                items, sizes = est.gather(conn, r2, ids)
+                e = est.plan(items, sizes, stages, args.max_tier)
+                scale = total / max(len(items), 1)
+                for k in e.usd:
+                    e.usd[k] *= scale
+                    e.calls[k] *= scale
+                e.unloaded_cited = int(e.unloaded_cited * scale)
+                e.digests = int(e.digests * scale)
+                out += est.report(f"All {total:,} in-scope {typ} (scaled from a sample of {len(items)};"
+                                  " digests overcounted because shared precedents are counted once per sample item set)", e)
+                grand += e.total
+            lo, hi = est.RANGE
+            out.append(f"== Full corpus, all types: ${grand:,.2f} (range ${grand * lo:,.2f} to ${grand * hi:,.2f};"
+                       f" Batch API about half)")
+        if not args.pilot and not args.sample:
+            ids = _scope_ids(conn, args)
+            items, sizes = est.gather(conn, r2, ids)
+            out += est.report(f"Scope: {len(ids)} items", est.plan(items, sizes, stages, args.max_tier))
+    print("\n".join(out))
+    print("\nDry run: no model was called and nothing was spent. Prices are the published rates as of"
+          " 2026-10-06; token counts are approximate.")
+
+
 def cmd_analyze(args) -> None:
     """Paid analysis. Only the `paid` GitHub environment has the API key."""
-    scope = {"ids": args.ids, "type": args.type, "years": args.years, "unscored": args.unscored}
+    scope = {"ids": args.ids, "type": args.type, "years": args.years, "unscored": args.unscored,
+             "pilot": args.pilot, "sample": args.sample}
     print(f"Scope: {scope}  budget: ${args.budget:.2f}  max tier: {args.max_tier}  dry run: {args.dry_run}")
-    if not args.dry_run and not os.environ.get("ANTHROPIC_API_KEY"):
+    if args.dry_run:
+        _dry_run(args)
+        return
+    if args.budget <= 0:
+        sys.exit("A paid run needs --budget greater than 0.")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ANTHROPIC_API_KEY is not set. Paid runs only work in the `paid` environment.")
-    sys.exit("Analysis stages arrive in phase 4. Nothing was run and nothing was spent.")
+    sys.exit("The paid stages are not built yet. Nothing was run and nothing was spent.")
 
 
 def main(argv=None) -> None:
@@ -160,9 +234,12 @@ def main(argv=None) -> None:
     an.add_argument("--type", choices=["scotus_case", "public_law", "executive_document", "action_event"])
     an.add_argument("--years", help="e.g. 2001-2004")
     an.add_argument("--unscored", action="store_true")
-    an.add_argument("--budget", type=float, required=True, help="hard cap in USD")
+    an.add_argument("--budget", type=float, default=0.0, help="hard cap in USD (required for paid runs)")
     an.add_argument("--max-tier", choices=["haiku", "sonnet", "opus"], default="sonnet")
     an.add_argument("--dry-run", action="store_true")
+    an.add_argument("--pilot", action="store_true", help="the calibration anchors in calibration/anchors.yaml")
+    an.add_argument("--sample", type=int, default=0,
+                    help="dry run: also estimate every in-scope item from a random sample of this many per type")
     an.set_defaults(fn=cmd_analyze)
 
     args = p.parse_args(argv)

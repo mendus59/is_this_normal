@@ -1,0 +1,42 @@
+# Calibration anchors: items most observers would place in the same band. Every rubric
+# version is scored against these before a large paid run. These are also the pilot.
+# Expected bands are proposals for review. An entry names an id, or a title fragment
+# plus a year when the id is not known in advance (slip-opinion ids, FR doc numbers).
+# `chain` groups same-actor items used to test the same-actor rule.
+version: 1
+
+scotus_case:
+  - {id: scotus/597-us-215, title: "Dobbs", year: 2022, expected: unprecedented, why: "Overrules Roe and Casey"}
+  - {id: scotus/603-us-369, title: "Loper Bright", year: 2024, expected: novel, why: "Overrules Chevron"}
+  - {id: scotus/603-us-593, title: "Trump v. United States", year: 2024, expected: unprecedented, why: "New presidential immunity doctrine"}
+  - {id: scotus/558-us-310, title: "Citizens United", year: 2010, expected: novel, why: "Overrules Austin and part of McConnell"}
+  - {id: scotus/600-us-181, title: "Students for Fair Admissions", year: 2023, expected: novel, why: "Effectively ends Grutter"}
+  - {id: scotus/590-us-644, title: "Bostock", year: 2020, expected: unusual, why: "Text-based but new reading of Title VII"}
+  - {id: scotus/567-us-519, title: "National Federation of Independent Business", year: 2012, expected: unusual, why: "First Spending Clause coercion holding"}
+  - {id: scotus/595-us-170, title: "Hughes v. Northwestern", year: 2022, expected: routine, why: "Unanimous ERISA application of Tibble"}
+  - {id: scotus/590-us-595, title: "Lomax", year: 2020, expected: routine, why: "Unanimous plain-text PLRA reading"}
+  - {id: scotus/590-us-212, title: "Romag Fasteners", year: 2020, expected: routine, why: "Unanimous statutory reading"}
+
+executive_document:
+  - {id: eo/13769, expected: novel, chain: travel-ban, why: "First travel ban (2017)"}
+  - {id: eo/13780, expected: novel, chain: travel-ban, why: "Revised travel ban by the same president; should not look normal because of 13769"}
+  - {title: "Enhancing Vetting Capabilities and Processes for Detecting Attempted Entry", year: 2017, subtype: proclamation, expected: novel, chain: travel-ban, why: "Proclamation 9645, third version"}
+  - {title: "Declaring a National Emergency Concerning the Southern Border", year: 2019, expected: novel, why: "Emergency used to redirect appropriations Congress declined"}
+  - {id: eo/14257, expected: unprecedented, why: "2025 reciprocal tariffs under IEEPA"}
+  - {id: eo/14028, expected: ordinary, why: "Cybersecurity directives to agencies"}
+  - {id: eo/13563, expected: routine, why: "Reaffirms EO 12866 regulatory review"}
+  - {id: eo/14067, expected: ordinary, why: "Digital assets study directive"}
+  - {title: "National Farm Safety and Health Week", year: 2015, expected: routine, why: "Ceremonial; should be pre-sorted"}
+  - {title: "Continuation of the National Emergency With Respect to Iran", year: 2010, expected: routine, why: "Annual continuation; should be pre-sorted"}
+
+public_law:
+  - {id: pl/111-148, expected: unusual, why: "Affordable Care Act"}
+  - {id: pl/115-97, expected: ordinary, why: "Tax Cuts and Jobs Act, reconciliation"}
+  - {id: pl/117-169, expected: ordinary, why: "Inflation Reduction Act, reconciliation"}
+  - {id: pl/117-2, expected: ordinary, why: "American Rescue Plan"}
+  - {id: pl/110-343, expected: unusual, why: "TARP"}
+  - {id: pl/112-25, expected: ordinary, why: "Budget Control Act of 2011"}
+  - {id: pl/111-203, expected: unusual, why: "Dodd-Frank"}
+  - {id: pl/119-21, expected: ordinary, why: "2025 reconciliation act"}
+  - {id: pl/109-366, expected: novel, why: "Military Commissions Act; habeas stripping"}
+  - {id: pl/108-105, expected: unusual, why: "Partial-Birth Abortion Ban Act"}
