@@ -155,12 +155,12 @@ def test_law_facts_votes_and_vehicle():
 
     class Conn:
         def execute(self, q, p):
-            return NS(fetchall=lambda: [("pl/109-171", "Deficit Reduction Act"), ("pl/111-152", "Health Care and Education Reconciliation Act")])
+            return NS(fetchone=lambda: (90, 100), fetchall=lambda: [("pl/109-171", "Deficit Reduction Act"), ("pl/111-152", "Health Care and Education Reconciliation Act")])
 
         def commit(self):
             pass
     law = _item(id="pl/115-97", type="public_law", subtype=None, effective_date=dt.date(2017, 12, 22),
-                title="An act to provide for reconciliation pursuant to titles II and V",
+                title="An act to provide for reconciliation pursuant to titles II and V", summary="x" * 5000,
                 metadata={"votes": [{"chamber": "Senate", "date": "2017-12-20", "yeas": 51, "nays": 48},
                                     {"chamber": "House", "date": "2018-01-05", "yeas": 1, "nays": 0}]})
     facts = data.record_facts(Conn(), law)
@@ -169,3 +169,4 @@ def test_law_facts_votes_and_vehicle():
     user, _ = prompts.type_assessment(RUBRIC, law, "s", {}, {}, [], facts)
     assert "Facts from the record" in user and "Authorities it relies on" in user
     assert data.record_facts(Conn(), _item()) == {}
+    assert facts["size_percentile"].startswith("90 ")
