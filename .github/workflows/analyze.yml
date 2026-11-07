@@ -37,9 +37,14 @@ on:
         type: boolean
         default: false
       compare:
-        description: "Use the cheaper comparison settings (results never become current scores)"
+        description: "Trial run: results never become current scores (standard profile also uses the comparison settings)"
         type: boolean
         default: false
+      profile:
+        description: "standard, or economy (one Haiku pass per item, ~$10 for everything)"
+        type: choice
+        options: [standard, economy]
+        default: standard
 
 concurrency: pipeline
 
@@ -76,6 +81,7 @@ jobs:
           [ "${{ inputs.dry_run }}" = "true" ] && args+=(--dry-run)
           [ "${{ inputs.pilot }}" = "true" ] && args+=(--pilot)
           [ "${{ inputs.compare }}" = "true" ] && args+=(--compare)
+          args+=(--profile "${{ inputs.profile }}")
           itn analyze "${args[@]}"
       - name: Calibration report
         if: always()

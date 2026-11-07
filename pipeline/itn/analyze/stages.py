@@ -36,15 +36,25 @@ def _hash(*parts) -> str:
 
 class Pipeline:
     def __init__(self, r2, client, rubric: dict, budget: float, max_tier: str, compare: bool = False,
-                 dispatched_by: str | None = None, scope: dict | None = None, log=print):
+                 dispatched_by: str | None = None, scope: dict | None = None, log=print,
+                 profile: str = "standard"):
         self.r2, self.client, self.rubric, self.log = r2, client, rubric, log
         self.compare = compare
-        self.stages = {**rubric["stages"], **(rubric.get("compare_stages", {}) if compare else {})}
+        self.economy = rubric.get("economy") if profile == "economy" else None
+        if profile == "economy" and not self.economy:
+            raise ValueError("the rubric has no economy settings")
         self.max_tier = max_tier
         self.effort = {**EFFORT, **(rubric.get("effort") or {})}
-        self.escalate = (rubric.get("compare_escalate") or {}) if compare else {}
+        if self.economy:
+            # The economy profile is its own setting; --compare only keeps its scores off the site.
+            self.stages = dict(self.economy["stages"])
+            self.effort.update(self.economy.get("effort") or {})
+            self.escalate = {}
+        else:
+            self.stages = {**rubric["stages"], **(rubric.get("compare_stages", {}) if compare else {})}
+            self.escalate = (rubric.get("compare_escalate") or {}) if compare else {}
         self.models = rubric["models"]
-        self.rv = f"{rubric['version']}{'-compare' if compare else ''}"
+        self.rv = f"{rubric['version']}{'-economy' if self.economy else ''}{'-compare' if compare else ''}"
         run_cfg = rubric.get("run", {})
         self.batch, self.caching = bool(run_cfg.get("batch")), bool(run_cfg.get("prompt_caching"))
         self.spend = Spend(budget)
@@ -121,6 +131,8 @@ class Pipeline:
         items = [i for i in items if not i.presort]
         if not items:
             return
+        if self.economy:
+            return self._score_economy(items)
         texts = {i.id: data.text_of(self.r2, i.text_keys, data.TEXT_MAX_CHARS) for i in items}
         with db.connect() as c:
             cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
@@ -203,6 +215,82 @@ class Pipeline:
             dims, raw, conf = merge(dims, dims2, conf)
             self._write_score(i, vid, dims, raw, conf)
 
+    def _score_economy(self, items) -> None:
+        """One Haiku assessment per item from free material (official summary or syllabus,
+        the start of the text, the free summaries of what it cites). Items rated unusual get
+        citation checks and a second pass that sees the check verdicts."""
+        e = self.economy
+        texts = {i.id: data.text_of(self.r2, i.text_keys, e["item_chars"]) for i in items}
+        with db.connect() as c:
+            cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
+            candidates = {i.id: [{**cd, "summary": cd["summary"][:e["analog_chars"]]}
+                                 for cd in data.analog_candidates(c, i, e["analogs"])] for i in items}
+            wanted = {ct["to"] for i in items for ct in cites[i.id][:e["max_cited"]] if not ct["summary"]}
+            keys = {a: data._text_keys(c, a) for a in wanted}
+        free = {a: data.text_of(self.r2, k, e["cited_chars"]) for a, k in keys.items() if k}
+
+        def material(ct):
+            return (ct["summary"] or free.get(ct["to"]) or ct["title"])[:e["cited_chars"]]
+
+        def item_material(i):
+            official = (i.summary or "")[:e["official_summary_chars"]]
+            start = texts[i.id][: max(0, e["item_chars"] - len(official))]
+            return f"{official}\n\nText (start):\n{start}" if official else f"Text (start):\n{start}"
+
+        users, jobs, allowed = {}, [], {}
+        for i in items:
+            top = cites[i.id][:e["max_cited"]]
+            user, schema = prompts.type_assessment(self.rubric, i, item_material(i),
+                                                   {ct["to"]: material(ct) for ct in top}, {}, candidates[i.id])
+            users[i.id] = user
+            allowed[i.id] = {i.id} | {ct["to"] for ct in cites[i.id]} | {cd["id"] for cd in candidates[i.id]}
+            jobs.append((i.id, i.as_of, user, schema))
+        assessed = self.call("type_assessment", jobs)
+
+        unusual, prelim = [], {}
+        for i in items:
+            out, aid = assessed.get(i.id, (None, None))
+            if not out:
+                continue
+            with db.connect() as c:
+                finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
+            dims, raw, conf = combine(self.rubric, i, out["dimensions"], allowed[i.id], finals)
+            if raw is None:
+                continue
+            prelim[i.id] = (dims, raw, conf)
+            self._write_score(i, aid, dims, raw, conf)
+            if raw < VERIFY_IF_RAW_BELOW or any(0 <= d["final"] <= VERIFY_IF_FINAL_AT_MOST for d in dims.values()):
+                unusual.append(i)
+        if not unusual:
+            return
+
+        check_jobs, check_meta = [], {}
+        for i in unusual:
+            for ct in [ct for ct in cites[i.id] if ct["context"]][:e["max_checks"]]:
+                sid = f"{i.id}->{ct['to']}"
+                check_meta[sid] = (i, ct)
+                check_jobs.append((sid, i.as_of, *prompts.citation_check(i, ct, material(ct))))
+        checks = self.call("citation_check", check_jobs)
+        self._second_check(checks, check_meta, material, tier="haiku")
+
+        vjobs = []
+        for i in unusual:
+            ck = {s.split("->", 1)[1]: (checks.get(s, (None,))[0] or {}).get("verdict")
+                  for s in check_meta if s.startswith(i.id + "->")}
+            user = users[i.id] + (f"\n\nCitation checks:\n{json.dumps(ck, indent=1)}" if ck else "")
+            vjobs.append((i.id, i.as_of, *prompts.verification(self.rubric, i, user, assessed[i.id][0])))
+        vout = self.call("verification", vjobs)
+        for i in unusual:
+            second, vid = vout.get(i.id, (None, None))
+            if not second:
+                continue
+            dims, raw, conf = prelim[i.id]
+            with db.connect() as c:
+                finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
+            dims2, _, _ = combine(self.rubric, i, second["dimensions"], allowed[i.id], finals)
+            dims, raw, conf = merge(dims, dims2, conf)
+            self._write_score(i, vid, dims, raw, conf)
+
     def _escalate(self, items, assessed, assess_jobs, allowed):
         """Comparison runs: re-assess low first-pass scores on the escalation tier."""
         low = set()
@@ -226,13 +314,14 @@ class Pipeline:
         self.log(f"escalated {len(low)} of {len(assessed)} assessments to {self.escalate['to']}")
         return {**assessed, **{k: v for k, v in again.items() if v[0]}}
 
-    def _second_check(self, checks, check_meta, material) -> None:
-        """Flags need two passes that agree. Re-check bad verdicts on the next tier up."""
+    def _second_check(self, checks, check_meta, material, tier: str | None = None) -> None:
+        """Flags need two passes that agree. Re-check bad verdicts on the next tier up
+        (or on `tier`, for the economy profile)."""
         bad = [s for s, (o, _) in checks.items() if o and o.get("verdict") in BAD_VERDICTS]
         if not bad:
             return
         saved = self.stages["citation_check"]
-        self.stages["citation_check"] = "sonnet" if saved == "haiku" else "opus"
+        self.stages["citation_check"] = tier or ("sonnet" if saved == "haiku" else "opus")
         try:
             again = self.call("citation_check", [
                 (s, check_meta[s][0].as_of,

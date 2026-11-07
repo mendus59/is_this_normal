@@ -182,6 +182,9 @@ def _dry_run(args) -> None:
                 f"{k} on {v}" for k, v in rubric["compare_stages"].items())
                 + (f", low scores re-assessed on {esc}" if esc else ""),
                 est.plan(items, sizes, alt, args.max_tier, escalate_to=esc, **opts))
+        if rubric.get("economy"):
+            out += est.report("Pilot economy pass (one Haiku pass from free material)",
+                              est.plan_economy(items, rubric["economy"], **flags))
         for it in items:
             tag = f"  [routine: {it.presort}]" if it.presort else ""
             out.append(f"    {it.id:28} {it.text_tokens:>8,} tok  {len(it.cited):>3} cites  {it.title[:60]}{tag}")
@@ -190,7 +193,7 @@ def _dry_run(args) -> None:
         print("\n".join(out), flush=True)
         out = []
     if args.sample:
-        grand = compare_total = 0.0
+        grand = compare_total = economy_total = 0.0
         for typ in ("scotus_case", "executive_document", "public_law"):
             conn = db.connect()  # each phase can outlast the database's idle timeout
             ids, total = est.sample_ids(conn, typ, args.sample)
@@ -208,6 +211,10 @@ def _dry_run(args) -> None:
                              escalate_to=esc, **opts)
                 out.append(f"  with the comparison settings: ${c.total * scale:,.2f}")
                 compare_total += c.total * scale
+            if rubric.get("economy"):
+                ec = est.plan_economy(items, rubric["economy"], **flags)
+                out.append(f"  with the economy settings: ${ec.total * scale:,.2f}")
+                economy_total += ec.total * scale
             grand += e.total
             print("\n".join(out), flush=True)
             out = []
@@ -215,6 +222,9 @@ def _dry_run(args) -> None:
         out.append(f"== Full corpus, all types ({mode}): ${grand:,.2f} (range ${grand * lo:,.2f} to ${grand * hi:,.2f})")
         if compare_total:
             out.append(f"== With the comparison settings: ${compare_total:,.2f}")
+        if economy_total:
+            out.append(f"== With the economy settings: ${economy_total:,.2f}"
+                       f" (range ${economy_total * lo:,.2f} to ${economy_total * hi:,.2f})")
     if not args.pilot and not args.sample:
         conn = db.connect()
         ids = _scope_ids(conn, args)
@@ -228,7 +238,7 @@ def _dry_run(args) -> None:
 def cmd_analyze(args) -> None:
     """Paid analysis. Only the `paid` GitHub environment has the API key."""
     scope = {"ids": args.ids, "type": args.type, "years": args.years, "unscored": args.unscored,
-             "pilot": args.pilot, "sample": args.sample, "compare": args.compare}
+             "pilot": args.pilot, "sample": args.sample, "compare": args.compare, "profile": args.profile}
     print(f"Scope: {scope}  budget: ${args.budget:.2f}  max tier: {args.max_tier}  dry run: {args.dry_run}")
     if args.dry_run:
         _dry_run(args)
@@ -252,10 +262,11 @@ def cmd_analyze(args) -> None:
             ids = _scope_ids(conn, args)
     if not ids:
         sys.exit("Nothing in scope.")
-    print(f"Scoring {len(ids)} items{' (comparison settings)' if args.compare else ''}", flush=True)
+    print(f"Scoring {len(ids)} items, {args.profile} settings"
+          f"{' (trial: scores stay off the site)' if args.compare else ''}", flush=True)
     pipeline = Pipeline(R2(), anthropic.Anthropic(), load_rubric(), args.budget, args.max_tier,
                         compare=args.compare, dispatched_by=os.environ.get("GITHUB_ACTOR"), scope=scope,
-                        log=lambda m: print(m, flush=True))
+                        log=lambda m: print(m, flush=True), profile=args.profile)
     pipeline.score(ids)
 
 
@@ -268,7 +279,7 @@ def cmd_calibration(args) -> None:
     def band(raw):
         return next(name for floor, name in BANDS if raw * 100 >= floor) if raw is not None else "-"
 
-    hits = {"current": 0, "compare": 0}
+    hits = {"current": 0, "compare": 0, "economy": 0}
     n = 0
     with db.connect() as conn:
         for typ, entries in load_anchors().items():
@@ -280,18 +291,23 @@ def cmd_calibration(args) -> None:
                     print(f"  {typ}: {a.get('id') or a.get('title')} not found")
                     continue
                 cur = conn.execute("SELECT raw FROM score WHERE artifact_id = %s AND current", (aid,)).fetchone()
-                cmp_ = conn.execute(
-                    "SELECT s.raw FROM score s JOIN analysis an ON an.id = s.analysis_id"
-                    " WHERE s.artifact_id = %s AND an.rubric_version LIKE '%%-compare'"
-                    " ORDER BY an.created_at DESC LIMIT 1", (aid,)).fetchone()
-                b1, b2 = band(cur[0] if cur else None), band(cmp_[0] if cmp_ else None)
+                def latest(pattern):
+                    row = conn.execute(
+                        "SELECT s.raw FROM score s JOIN analysis an ON an.id = s.analysis_id"
+                        " WHERE s.artifact_id = %s AND an.rubric_version ~ %s"
+                        " ORDER BY an.created_at DESC, s.analysis_id DESC LIMIT 1", (aid, pattern)).fetchone()
+                    return band(row[0] if row else None)
+                b1 = band(cur[0] if cur else None)
+                b2, b3 = latest(r"^[0-9]+-compare$"), latest(r"-economy")
                 n += 1
                 hits["current"] += b1 == a["expected"]
                 hits["compare"] += b2 == a["expected"]
-                print(f"  {aid:28} expected {a['expected']:13} current {b1:13} compare {b2:13}")
+                hits["economy"] += b3 == a["expected"]
+                print(f"  {aid:28} expected {a['expected']:13} current {b1:13} compare {b2:13} economy {b3:13}")
         cost = conn.execute("SELECT id, status, cost_usd, scope->>'rubric' FROM run WHERE NOT dry_run"
                             " ORDER BY id DESC LIMIT 5").fetchall()
-    print(f"Matches (by raw score, pilot only): current {hits['current']}/{n}, compare {hits['compare']}/{n}")
+    print(f"Matches (by raw score, pilot only): current {hits['current']}/{n}, compare {hits['compare']}/{n},"
+          f" economy {hits['economy']}/{n}")
     for r in cost:
         print(f"  run {r[0]} {r[1]} ${r[2]} rubric {r[3]}")
 
@@ -330,7 +346,9 @@ def main(argv=None) -> None:
     an.add_argument("--dry-run", action="store_true")
     an.add_argument("--pilot", action="store_true", help="the calibration anchors in calibration/anchors.yaml")
     an.add_argument("--compare", action="store_true",
-                    help="use the rubric's compare_stages; results are stored but never become current scores")
+                    help="trial run: standard profile uses compare_stages; results never become current scores")
+    an.add_argument("--profile", choices=["standard", "economy"], default="standard",
+                    help="economy: one Haiku pass per item from free material (rubric `economy:`)")
     an.add_argument("--sample", type=int, default=0,
                     help="dry run: also estimate every in-scope item from a random sample of this many per type")
     an.set_defaults(fn=cmd_analyze)

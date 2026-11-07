@@ -131,6 +131,33 @@ def plan(items: list[Item], digest_sizes: dict[str, int], stages: dict, max_tier
     return est
 
 
+# Economy profile (rubric `economy:`): one Haiku assessment per item from free material.
+ECON_ASSESS_OUT = 1_200          # one short reason per dimension
+ECON_CHECK_IN = 1_000
+ECON_VERIFY_SHARE = 0.4          # items rated unusual: checked and given a second pass
+
+
+def plan_economy(items: list[Item], cfg: dict, batch: bool = True, caching: bool = True) -> Estimate:
+    est = Estimate(items=items)
+    hit = PROMPT if caching else 0
+    eff = cfg.get("effort") or {}
+    c = lambda s_in, s_out, cached, stage: _cost("haiku", s_in, s_out, cached, batch, eff.get(stage, "low"))
+    for it in items:
+        if it.presort:
+            continue
+        item_in = min(it.text_tokens, cfg["item_chars"] // CHARS_PER_TOKEN)
+        cited = min(len(it.cited), cfg["max_cited"]) * (cfg["cited_chars"] // CHARS_PER_TOKEN + 30)
+        analogs = cfg["analogs"] * (cfg["analog_chars"] // CHARS_PER_TOKEN + 40)
+        a_in = PROMPT + 300 + item_in + cited + analogs
+        est.add("type_assessment", 1, c(a_in, ECON_ASSESS_OUT, hit, "type_assessment"))
+        checks = min(len(it.cited), cfg["max_checks"])
+        est.add("citation_check", ECON_VERIFY_SHARE * checks,
+                ECON_VERIFY_SHARE * checks * c(ECON_CHECK_IN, CHECK_OUT, min(hit, ECON_CHECK_IN // 2), "citation_check"))
+        est.add("verification", ECON_VERIFY_SHARE,
+                ECON_VERIFY_SHARE * c(a_in + ECON_ASSESS_OUT + checks * 60, ECON_ASSESS_OUT, hit, "verification"))
+    return est
+
+
 # ---- gathering inputs from the database and R2 -------------------------------------
 
 def _keys(conn, ids: list[str]) -> dict[str, list[str]]:
