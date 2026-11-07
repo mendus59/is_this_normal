@@ -28,6 +28,9 @@ VERIFY_IF_FINAL_AT_MOST = 1
 VERIFY_IF_RAW_BELOW = 0.5
 DISAGREEMENT = 2
 DISAGREEMENT_CONFIDENCE = 0.7
+# Small stages skip the Batch API: its queue can take hours, which costs more in waiting
+# than the discount saves on a few dozen calls.
+BATCH_MIN = 100
 
 
 def _hash(*parts) -> str:
@@ -86,7 +89,8 @@ class Pipeline:
             reqs = [Req(f"{stage[:8]}-{i}", stage, tier, system, keyed[s][1], keyed[s][2], self.effort.get(stage))
                     for i, s in enumerate(todo)]
             subject = {r.custom_id: s for r, s in zip(reqs, todo)}
-            results = run_requests(self.client, reqs, self.models, self.spend, self.batch, self.caching)
+            results = run_requests(self.client, reqs, self.models, self.spend,
+                                   self.batch and len(reqs) >= BATCH_MIN, self.caching)
             with db.connect() as c:
                 for cid, res in results.items():
                     s = subject[cid]

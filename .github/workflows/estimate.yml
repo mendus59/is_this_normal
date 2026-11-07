@@ -42,3 +42,6 @@ jobs:
           args=(--dry-run --max-tier "${{ inputs.max_tier }}" --sample "${{ inputs.sample }}")
           [ "${{ inputs.pilot }}" = "true" ] && args+=(--pilot)
           itn analyze "${args[@]}"
+      - name: Calibration report (free; reads stored scores)
+        if: always()
+        run: itn calibration --detail

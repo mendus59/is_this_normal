@@ -304,6 +304,14 @@ def cmd_calibration(args) -> None:
                 hits["compare"] += b2 == a["expected"]
                 hits["economy"] += b3 == a["expected"]
                 print(f"  {aid:28} expected {a['expected']:13} current {b1:13} compare {b2:13} economy {b3:13}")
+                if args.detail:
+                    row = conn.execute(
+                        "SELECT kind, output FROM analysis WHERE subject_id = %s AND rubric_version ~ '-economy'"
+                        " AND kind IN ('type_assessment', 'verification') ORDER BY created_at DESC, id DESC LIMIT 1",
+                        (aid,)).fetchone()
+                    for name, d in ((row[1] or {}).get("dimensions", {}) if row else {}).items():
+                        print(f"      {row[0][:6]} {name:10} {d.get('rating')}/{d.get('rating_independent')}"
+                              f" evidence {d.get('evidence')}")
         cost = conn.execute("SELECT id, status, cost_usd, scope->>'rubric' FROM run WHERE NOT dry_run"
                             " ORDER BY id DESC LIMIT 5").fetchall()
     print(f"Matches (by raw score, pilot only): current {hits['current']}/{n}, compare {hits['compare']}/{n},"
@@ -334,7 +342,9 @@ def main(argv=None) -> None:
     sub.add_parser("publish", help="export static files to R2 (free)").set_defaults(fn=cmd_publish)
     sub.add_parser("status", help="counts of loaded and missing records (free)").set_defaults(fn=cmd_status)
 
-    sub.add_parser("calibration", help="anchor bands vs scores (free)").set_defaults(fn=cmd_calibration)
+    cal = sub.add_parser("calibration", help="anchor bands vs scores (free)")
+    cal.add_argument("--detail", action="store_true", help="also print each economy rating and its evidence")
+    cal.set_defaults(fn=cmd_calibration)
 
     an = sub.add_parser("analyze", help="run paid analysis")
     an.add_argument("--ids", nargs="*", default=[])

@@ -28,7 +28,9 @@ Rules that apply to every task:
 - Judge only from the material provided. It contains nothing dated after the item's
   as-of date (the day before it took effect). Do not use anything you know about later
   events, later rulings, or how the item was received.
-- Cite evidence by the artifact ids given in the material. Do not invent ids.
+- Cite evidence by the artifact ids given in the material. Do not invent ids. When the
+  evidence is the item's own text, cite the item's own id. Every rating of 0-4 needs at
+  least one evidence id.
 - If the material is not enough to judge, say so (rating -1) rather than guess.
 - Be even-handed across parties, presidents, and courts. Describe; do not editorialize.
 
