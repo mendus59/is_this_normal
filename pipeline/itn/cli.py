@@ -311,7 +311,7 @@ def cmd_calibration(args) -> None:
                         (aid,)).fetchone()
                     for name, d in ((row[1] or {}).get("dimensions", {}) if row else {}).items():
                         print(f"      {row[0][:6]} {name:10} {d.get('rating')}/{d.get('rating_independent')}"
-                              f" evidence {d.get('evidence')}")
+                              f" evidence {d.get('evidence')}  {(d.get('reason') or '')[:220]}")
         cost = conn.execute("SELECT id, status, cost_usd, scope->>'rubric' FROM run WHERE NOT dry_run"
                             " ORDER BY id DESC LIMIT 5").fetchall()
     print(f"Matches (by raw score, pilot only): current {hits['current']}/{n}, compare {hits['compare']}/{n},"
