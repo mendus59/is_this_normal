@@ -5,15 +5,13 @@ import json
 import time
 from dataclasses import dataclass
 
-from itn.analyze.estimate import BATCH, CACHE_READ, CHARS_PER_TOKEN, HAIKU_LONG, HAIKU_LONG_FROM, PRICES
+from itn.analyze.estimate import BATCH, CACHE_READ, CHARS_PER_TOKEN, EFFORT, HAIKU_LONG, HAIKU_LONG_FROM, PRICES
 
 CACHE_WRITE = 1.25
 CHUNK = 200                 # requests per batch; the budget is checked between chunks
 POLL_SECONDS = 30
 MAX_TOKENS = {"summary": 4_000, "authority_digest": 4_000, "citation_check": 2_000,
-              "analog_assessment": 8_000, "type_assessment": 16_000, "verification": 16_000}
-EFFORT = {"summary": "low", "authority_digest": "medium", "citation_check": "low",
-          "analog_assessment": "medium", "type_assessment": "high", "verification": "high"}
+              "type_assessment": 16_000, "verification": 16_000}
 
 
 class BudgetExceeded(RuntimeError):
@@ -28,6 +26,7 @@ class Req:
     system: str
     user: str
     schema: dict
+    effort: str | None = None
 
 
 @dataclass
@@ -83,7 +82,7 @@ def _params(req: Req, models: dict, caching: bool) -> dict:
     system = [{"type": "text", "text": req.system, **({"cache_control": {"type": "ephemeral"}} if caching else {})}]
     return {"model": models[req.tier], "max_tokens": MAX_TOKENS[req.stage], "system": system,
             "messages": [{"role": "user", "content": req.user}],
-            "output_config": {"effort": EFFORT[req.stage],
+            "output_config": {"effort": req.effort or EFFORT[req.stage],
                               "format": {"type": "json_schema", "schema": req.schema}}}
 
 

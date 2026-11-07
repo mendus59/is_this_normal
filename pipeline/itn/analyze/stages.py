@@ -3,8 +3,10 @@
 inputs, so a re-run (or a run stopped by its budget) never pays twice for the same call.
 
 Stages, each sent as one batch across all items:
-  summary -> authority_digest -> citation_check -> analog_assessment -> type_assessment
-  -> combine (same-actor rule, free) -> verification for low scores -> final score.
+  summary -> authority_digest -> citation_check -> type_assessment (which also reads the
+  comparable earlier items) -> combine (same-actor rule, free) -> verification for low
+  scores -> final score. In --compare runs with compare_escalate, low Haiku assessments
+  are re-run on the escalation tier before combining.
 """
 
 import hashlib
@@ -16,6 +18,7 @@ from psycopg.types.json import Jsonb
 from itn import db
 from itn.analyze import data, prompts
 from itn.analyze.actors import final_rating
+from itn.analyze.estimate import EFFORT
 from itn.analyze.llm import BudgetExceeded, Req, Spend, run as run_requests, tier_of
 
 MAX_DIGESTS_PER_ITEM = 15
@@ -38,6 +41,8 @@ class Pipeline:
         self.compare = compare
         self.stages = {**rubric["stages"], **(rubric.get("compare_stages", {}) if compare else {})}
         self.max_tier = max_tier
+        self.effort = {**EFFORT, **(rubric.get("effort") or {})}
+        self.escalate = (rubric.get("compare_escalate") or {}) if compare else {}
         self.models = rubric["models"]
         self.rv = f"{rubric['version']}{'-compare' if compare else ''}"
         run_cfg = rubric.get("run", {})
@@ -68,7 +73,8 @@ class Pipeline:
         todo = [s for s in keyed if s not in out]
         if todo:
             self.log(f"{stage}: {len(todo)} calls on {tier} ({len(out)} cached)")
-            reqs = [Req(f"{stage[:8]}-{i}", stage, tier, system, keyed[s][1], keyed[s][2]) for i, s in enumerate(todo)]
+            reqs = [Req(f"{stage[:8]}-{i}", stage, tier, system, keyed[s][1], keyed[s][2], self.effort.get(stage))
+                    for i, s in enumerate(todo)]
             subject = {r.custom_id: s for r, s in zip(reqs, todo)}
             results = run_requests(self.client, reqs, self.models, self.spend, self.batch, self.caching)
             with db.connect() as c:
@@ -152,22 +158,19 @@ class Pipeline:
         checks = self.call("citation_check", check_jobs)
         self._second_check(checks, check_meta, material)
 
-        analogs = self.call("analog_assessment", [
-            (i.id, i.as_of, *prompts.analog_assessment(i, summary[i.id], candidates[i.id])) for i in items])
-
         assess_users, assess_jobs, allowed = {}, [], {}
         for i in items:
             top = cites[i.id][:MAX_DIGESTS_PER_ITEM]
             dg = {ct["to"]: material(ct) for ct in top}
             ck = {s.split("->", 1)[1]: (checks.get(s, (None,))[0] or {}).get("verdict")
                   for s in check_meta if s.startswith(i.id + "->")}
-            an = analogs.get(i.id, (None,))[0] or {}
-            same = [cd["id"] for cd in candidates[i.id] if cd["same_actor"]]
-            user, schema = prompts.type_assessment(self.rubric, i, summary[i.id], dg, ck, an, same)
+            user, schema = prompts.type_assessment(self.rubric, i, summary[i.id], dg, ck, candidates[i.id])
             assess_users[i.id] = user
             allowed[i.id] = {i.id} | {ct["to"] for ct in cites[i.id]} | {cd["id"] for cd in candidates[i.id]}
             assess_jobs.append((i.id, i.as_of, user, schema))
         assessed = self.call("type_assessment", assess_jobs)
+        if self.escalate:
+            assessed = self._escalate(items, assessed, assess_jobs, allowed)
 
         # Combine in date order so the same-actor rule sees earlier finals from this run too.
         verify, prelim = [], {}
@@ -199,6 +202,29 @@ class Pipeline:
             dims2, _, _ = combine(self.rubric, i, second["dimensions"], allowed[i.id], finals)
             dims, raw, conf = merge(dims, dims2, conf)
             self._write_score(i, vid, dims, raw, conf)
+
+    def _escalate(self, items, assessed, assess_jobs, allowed):
+        """Comparison runs: re-assess low first-pass scores on the escalation tier."""
+        low = set()
+        for i in items:
+            out = assessed.get(i.id, (None, None))[0]
+            if not out:
+                continue
+            dims, raw, _ = combine(self.rubric, i, out["dimensions"], allowed[i.id], {})
+            if raw is not None and (raw < self.escalate.get("if_raw_below", 0)
+                                    or any(0 <= d["final"] <= self.escalate.get("if_any_final_at_most", -1)
+                                           for d in dims.values())):
+                low.add(i.id)
+        if not low:
+            return assessed
+        saved = self.stages["type_assessment"]
+        self.stages["type_assessment"] = self.escalate["to"]
+        try:
+            again = self.call("type_assessment", [j for j in assess_jobs if j[0] in low])
+        finally:
+            self.stages["type_assessment"] = saved
+        self.log(f"escalated {len(low)} of {len(assessed)} assessments to {self.escalate['to']}")
+        return {**assessed, **{k: v for k, v in again.items() if v[0]}}
 
     def _second_check(self, checks, check_meta, material) -> None:
         """Flags need two passes that agree. Re-check bad verdicts on the next tier up."""

@@ -18,8 +18,11 @@ CHARS_PER_TOKEN = 4
 PRICES = {"haiku": (0.10, 0.50), "sonnet": (2.00, 10.00), "opus": (4.00, 20.00)}
 HAIKU_LONG = (0.50, 2.50)
 HAIKU_LONG_FROM = 100_000
-# Thinking is billed as output; allowance on top of the visible output.
-THINKING = {"haiku": 1.5, "sonnet": 2.0, "opus": 2.0}
+# Thinking is billed as output: allowance on top of the visible output, by effort level.
+THINKING = {"low": 1.2, "medium": 1.5, "high": 2.0}
+EFFORT = {"summary": "low", "authority_digest": "medium", "citation_check": "low",
+          "type_assessment": "medium", "verification": "high"}
+ESCALATE_SHARE = 0.4    # comparison: share of Haiku assessments re-run on Sonnet
 TIERS = ["haiku", "sonnet", "opus"]
 
 PROMPT = 2_000              # rubric and instructions per call
@@ -28,7 +31,7 @@ SUMMARY_OUT = 800
 CHECK_IN, CHECK_OUT = 2_000, 300        # citing context + the cited item's free syllabus or summary
 MAX_CHECKS_PER_ITEM = 60
 DIGEST_MAX_IN, DIGEST_OUT = 40_000, 1_500
-ANALOG_IN, ANALOG_OUT = 9_000, 1_500    # item summary + about 12 candidate summaries
+ANALOG_IN = 7_000                       # about 12 comparable earlier items, read by the assessment
 DIGESTS_IN_ASSESSMENT = 15             # digests are written only for each item's most-cited authorities
 ASSESS_OUT = 3_000
 VERIFY_SHARE = 0.4                      # assumed share rated novel or unprecedented
@@ -43,13 +46,14 @@ CACHE_READ = 0.1      # cached input costs a tenth of the input price
 BATCH = 0.5           # Batch API halves both input and output
 
 
-def cost(tier: str, tokens_in: int, tokens_out: int, cached: int = 0, batch: bool = False) -> float:
+def cost(tier: str, tokens_in: int, tokens_out: int, cached: int = 0, batch: bool = False,
+         effort: str = "high") -> float:
     """cached: how many of tokens_in are a cache hit (the shared rubric prefix)."""
     p_in, p_out = PRICES[tier]
     if tier == "haiku" and tokens_in > HAIKU_LONG_FROM:
         p_in, p_out = HAIKU_LONG
     usd = ((tokens_in - cached) * p_in + cached * p_in * CACHE_READ
-           + tokens_out * THINKING[tier] * p_out) / 1e6
+           + tokens_out * THINKING[effort] * p_out) / 1e6
     return usd * (BATCH if batch else 1.0)
 
 
@@ -88,33 +92,41 @@ class Estimate:
 
 
 def plan(items: list[Item], digest_sizes: dict[str, int], stages: dict, max_tier: str,
-         batch: bool = False, caching: bool = False) -> Estimate:
+         batch: bool = False, caching: bool = False, effort: dict | None = None,
+         escalate_to: str | None = None) -> Estimate:
     """Cost of scoring `items`. digest_sizes maps each loaded cited artifact to its text
     size in tokens; cited ids missing from it are not loaded and get no digest."""
     t = {s: cap_tier(tier, max_tier) for s, tier in stages.items()}
     est = Estimate(items=items)
     hit = PROMPT if caching else 0
 
-    def cost(tier, tokens_in, tokens_out, cached=0):
-        return _cost(tier, tokens_in, tokens_out, cached, batch)
+    eff = {**EFFORT, **(effort or {})}
+
+    def cost(tier, tokens_in, tokens_out, cached=0, stage=None):
+        return _cost(tier, tokens_in, tokens_out, cached, batch, eff.get(stage, "high"))
     need_digest = set()
     for it in items:
         if it.presort:
             continue
         s_in = min(it.text_tokens, SUMMARY_MAX_IN) + 1_000
-        est.add("summary", 1, cost(t["summary"], s_in, SUMMARY_OUT))  # no shared prefix worth caching
+        est.add("summary", 1, cost(t["summary"], s_in, SUMMARY_OUT, stage="summary"))  # no shared prefix worth caching
         checks = min(len(it.cited), MAX_CHECKS_PER_ITEM)
-        est.add("citation_check", checks, checks * cost(t["citation_check"], CHECK_IN, CHECK_OUT, min(hit, CHECK_IN // 2)))
+        est.add("citation_check", checks, checks * cost(t["citation_check"], CHECK_IN, CHECK_OUT, min(hit, CHECK_IN // 2), "citation_check"))
         loaded = [c for c in it.cited if c in digest_sizes]
         need_digest.update(loaded[:DIGESTS_IN_ASSESSMENT])
         est.unloaded_cited += len(it.cited) - len(loaded)
-        est.add("analog_assessment", 1, cost(t["analog_assessment"], ANALOG_IN, ANALOG_OUT, hit))
-        a_in = PROMPT + 1_000 + min(len(loaded), DIGESTS_IN_ASSESSMENT) * DIGEST_OUT + checks * 80 + ANALOG_OUT
-        est.add("type_assessment", 1, cost(t["type_assessment"], a_in, ASSESS_OUT, hit))
-        est.add("verification", VERIFY_SHARE, VERIFY_SHARE * cost(t["verification"], a_in + ASSESS_OUT, VERIFY_OUT, hit))
+        # The assessment reads the comparable earlier items itself (no separate analog call).
+        a_in = PROMPT + 1_000 + min(len(loaded), DIGESTS_IN_ASSESSMENT) * DIGEST_OUT + checks * 80 + ANALOG_IN
+        est.add("type_assessment", 1, cost(t["type_assessment"], a_in, ASSESS_OUT, hit, "type_assessment"))
+        if escalate_to:
+            esc = cap_tier(escalate_to, max_tier)
+            est.add("type_assessment", ESCALATE_SHARE,
+                    ESCALATE_SHARE * cost(esc, a_in, ASSESS_OUT, hit, "type_assessment"))
+        est.add("verification", VERIFY_SHARE,
+                VERIFY_SHARE * cost(t["verification"], a_in + ASSESS_OUT, VERIFY_OUT, hit, "verification"))
     for c in need_digest:
         d_in = min(digest_sizes[c], DIGEST_MAX_IN) + 1_500
-        est.add("authority_digest", 1, cost(t["authority_digest"], d_in, DIGEST_OUT))
+        est.add("authority_digest", 1, cost(t["authority_digest"], d_in, DIGEST_OUT, stage="authority_digest"))
     est.digests = len(need_digest)
     return est
 
@@ -220,8 +232,7 @@ def report(title: str, est: Estimate) -> list[str]:
     lines = [f"== {title}",
              f"items: {len(est.items)}  pre-sorted routine: {sum(1 for i in est.items if i.presort)}"
              f"  authority digests: {est.digests}  cited but not loaded: {est.unloaded_cited}"]
-    for stage in ["summary", "citation_check", "authority_digest", "analog_assessment",
-                  "type_assessment", "verification"]:
+    for stage in ["summary", "citation_check", "authority_digest", "type_assessment", "verification"]:
         if stage in est.calls:
             lines.append(f"  {stage:18} calls {est.calls[stage]:>9,.0f}   ${est.usd[stage]:>9,.2f}")
     lines.append(f"  total ${est.total:,.2f}  (range ${est.total * lo:,.2f} to ${est.total * hi:,.2f})")

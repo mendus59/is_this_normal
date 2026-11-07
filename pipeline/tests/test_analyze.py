@@ -103,4 +103,16 @@ def test_batch_and_caching_lower_cost():
 def test_rubric_cost_settings():
     r = load_rubric()
     assert r["run"] == {"batch": True, "prompt_caching": True}
-    assert r["compare_stages"] == {"authority_digest": "haiku", "verification": "sonnet"}
+    assert r["compare_stages"] == {"authority_digest": "haiku", "verification": "sonnet", "type_assessment": "haiku"}
+    assert r["effort"]["type_assessment"] == "medium" and "analog_assessment" not in r["stages"]
+
+
+def test_escalation_adds_cost_and_medium_effort_saves():
+    items = [est.Item("a", "scotus_case", "A", 20_000, ["x"])]
+    stages = {**load_rubric()["stages"], "type_assessment": "haiku"}
+    plain = est.plan(items, {"x": 5_000}, stages, "opus").total
+    esc = est.plan(items, {"x": 5_000}, stages, "opus", escalate_to="sonnet").total
+    assert esc > plain
+    high = est.plan(items, {"x": 5_000}, load_rubric()["stages"], "opus", effort={"type_assessment": "high"}).total
+    med = est.plan(items, {"x": 5_000}, load_rubric()["stages"], "opus", effort={"type_assessment": "medium"}).total
+    assert med < high
