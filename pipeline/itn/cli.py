@@ -224,7 +224,7 @@ def _dry_run(args) -> None:
 def cmd_analyze(args) -> None:
     """Paid analysis. Only the `paid` GitHub environment has the API key."""
     scope = {"ids": args.ids, "type": args.type, "years": args.years, "unscored": args.unscored,
-             "pilot": args.pilot, "sample": args.sample}
+             "pilot": args.pilot, "sample": args.sample, "compare": args.compare}
     print(f"Scope: {scope}  budget: ${args.budget:.2f}  max tier: {args.max_tier}  dry run: {args.dry_run}")
     if args.dry_run:
         _dry_run(args)
@@ -233,7 +233,63 @@ def cmd_analyze(args) -> None:
         sys.exit("A paid run needs --budget greater than 0.")
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ANTHROPIC_API_KEY is not set. Paid runs only work in the `paid` environment.")
-    sys.exit("The paid stages are not built yet. Nothing was run and nothing was spent.")
+    import anthropic
+
+    from itn.analyze import estimate as est
+    from itn.analyze.rubric import load_anchors, load_rubric
+    from itn.analyze.stages import Pipeline
+    from itn.storage import R2
+
+    with db.connect() as conn:
+        if args.pilot:
+            ids = [aid for typ, entries in load_anchors().items() if isinstance(entries, list)
+                   for a in entries if (aid := est.resolve_anchor(conn, typ, a))]
+        else:
+            ids = _scope_ids(conn, args)
+    if not ids:
+        sys.exit("Nothing in scope.")
+    print(f"Scoring {len(ids)} items{' (comparison settings)' if args.compare else ''}", flush=True)
+    pipeline = Pipeline(R2(), anthropic.Anthropic(), load_rubric(), args.budget, args.max_tier,
+                        compare=args.compare, dispatched_by=os.environ.get("GITHUB_ACTOR"), scope=scope,
+                        log=lambda m: print(m, flush=True))
+    pipeline.score(ids)
+
+
+def cmd_calibration(args) -> None:
+    """Free: each anchor's expected band next to its current score and comparison score."""
+    from itn.analyze import estimate as est
+    from itn.analyze.rubric import load_anchors
+    from itn.publish.export import BANDS
+
+    def band(raw):
+        return next(name for floor, name in BANDS if raw * 100 >= floor) if raw is not None else "-"
+
+    hits = {"current": 0, "compare": 0}
+    n = 0
+    with db.connect() as conn:
+        for typ, entries in load_anchors().items():
+            if not isinstance(entries, list):
+                continue
+            for a in entries:
+                aid = est.resolve_anchor(conn, typ, a)
+                if not aid:
+                    print(f"  {typ}: {a.get('id') or a.get('title')} not found")
+                    continue
+                cur = conn.execute("SELECT raw FROM score WHERE artifact_id = %s AND current", (aid,)).fetchone()
+                cmp_ = conn.execute(
+                    "SELECT s.raw FROM score s JOIN analysis an ON an.id = s.analysis_id"
+                    " WHERE s.artifact_id = %s AND an.rubric_version LIKE '%%-compare'"
+                    " ORDER BY an.created_at DESC LIMIT 1", (aid,)).fetchone()
+                b1, b2 = band(cur[0] if cur else None), band(cmp_[0] if cmp_ else None)
+                n += 1
+                hits["current"] += b1 == a["expected"]
+                hits["compare"] += b2 == a["expected"]
+                print(f"  {aid:28} expected {a['expected']:13} current {b1:13} compare {b2:13}")
+        cost = conn.execute("SELECT id, status, cost_usd, scope->>'rubric' FROM run WHERE NOT dry_run"
+                            " ORDER BY id DESC LIMIT 5").fetchall()
+    print(f"Matches (by raw score, pilot only): current {hits['current']}/{n}, compare {hits['compare']}/{n}")
+    for r in cost:
+        print(f"  run {r[0]} {r[1]} ${r[2]} rubric {r[3]}")
 
 
 def main(argv=None) -> None:
@@ -258,6 +314,8 @@ def main(argv=None) -> None:
     sub.add_parser("publish", help="export static files to R2 (free)").set_defaults(fn=cmd_publish)
     sub.add_parser("status", help="counts of loaded and missing records (free)").set_defaults(fn=cmd_status)
 
+    sub.add_parser("calibration", help="anchor bands vs scores (free)").set_defaults(fn=cmd_calibration)
+
     an = sub.add_parser("analyze", help="run paid analysis")
     an.add_argument("--ids", nargs="*", default=[])
     an.add_argument("--type", choices=["scotus_case", "public_law", "executive_document", "action_event"])
@@ -267,6 +325,8 @@ def main(argv=None) -> None:
     an.add_argument("--max-tier", choices=["haiku", "sonnet", "opus"], default="sonnet")
     an.add_argument("--dry-run", action="store_true")
     an.add_argument("--pilot", action="store_true", help="the calibration anchors in calibration/anchors.yaml")
+    an.add_argument("--compare", action="store_true",
+                    help="use the rubric's compare_stages; results are stored but never become current scores")
     an.add_argument("--sample", type=int, default=0,
                     help="dry run: also estimate every in-scope item from a random sample of this many per type")
     an.set_defaults(fn=cmd_analyze)

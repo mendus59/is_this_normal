@@ -32,6 +32,14 @@ on:
         description: "Estimate cost only, call no model"
         type: boolean
         default: true
+      pilot:
+        description: "Score the 30 calibration anchors (ignores ids/type/years)"
+        type: boolean
+        default: false
+      compare:
+        description: "Use the cheaper comparison settings (results never become current scores)"
+        type: boolean
+        default: false
 
 concurrency: pipeline
 
@@ -66,4 +74,9 @@ jobs:
           [ -n "$YEARS" ] && args+=(--years "$YEARS")
           [ "${{ inputs.unscored }}" = "true" ] && args+=(--unscored)
           [ "${{ inputs.dry_run }}" = "true" ] && args+=(--dry-run)
+          [ "${{ inputs.pilot }}" = "true" ] && args+=(--pilot)
+          [ "${{ inputs.compare }}" = "true" ] && args+=(--compare)
           itn analyze "${args[@]}"
+      - name: Calibration report
+        if: always()
+        run: itn calibration
