@@ -125,7 +125,7 @@ def test_economy_path_one_pass_then_checks_and_second_pass_for_unusual(monkeypat
             "date": None, "summary": "", "type": "usc_section"}
     monkeypatch.setattr(data, "citations", lambda c, r2, i, t: [cite])
     monkeypatch.setattr(data, "analog_candidates", lambda c, i, n: [])
-    monkeypatch.setattr(data, "record_facts", lambda c, i: {})
+    monkeypatch.setattr(data, "record_facts", lambda c, i, t=None: {})
     monkeypatch.setattr(data, "_text_keys", lambda c, a: ["k2"])
     monkeypatch.setattr(data, "same_actor_finals", lambda c, i, ids: {})
     dims = rubric["types"]["executive_document"]["dimensions"]
@@ -170,3 +170,12 @@ def test_law_facts_votes_and_vehicle():
     assert "Facts from the record" in user and "Authorities it relies on" in user
     assert data.record_facts(Conn(), _item()) == {}
     assert facts["size_percentile"].startswith("90 ")
+
+
+def test_scotus_overruling_passages():
+    from itn.analyze import data
+
+    case = _item(id="scotus/597-us-215", type="scotus_case", subtype=None)
+    text = "Held: The Constitution does not confer a right to abortion. Roe and Casey are overruled. Other text."
+    assert data.record_facts(None, case, text)["overruling_passages"] == ["Roe and Casey are overruled."]
+    assert data.record_facts(None, case, "Nothing here.")["overruling_passages"].startswith("none")

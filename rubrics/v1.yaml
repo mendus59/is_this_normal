@@ -68,7 +68,7 @@ types:
   public_law:
     shown_not_scored: [party_line_vote]
     dimensions:
-      # Vehicles are judged by how common they were at the time (decision pending, 2026-11-07).
+      # Vehicles are judged by how common they were at the time (Patrick decided 2026-11-07).
       process: "Did it pass the way laws of its kind usually passed at the time? Reconciliation, omnibus or continuing-resolution vehicles are a departure only to the extent the facts show they were rare then; skipped committees or unusually fast passage count against it."
       footing: "Is the constitutional power it relies on well supported by the Court's cases as of that day?"
       scope: "How much of the U.S. Code does it change, compared with other laws? Use the size percentile in the facts: large laws are common, so size alone is at most unusual."
@@ -128,7 +128,7 @@ economy:
     verification: haiku
   effort:
     citation_check: low
-    type_assessment: medium
+    type_assessment: low     # medium was tried on the pilot 2026-11-07 and did not help
     verification: low
   item_chars: 24000
   official_summary_chars: 12000
