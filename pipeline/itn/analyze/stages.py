@@ -75,7 +75,7 @@ class Pipeline:
         """jobs: (subject_id, as_of, user prompt, schema). Returns subject -> (output, analysis id)."""
         tier = self._tier(stage)
         system = prompts.system_prompt(self.rubric, stage)
-        keyed = {s: (a, u, sch, _hash(stage, self.rv, self.models[tier], system, u)) for s, a, u, sch in jobs}
+        keyed = {s: (a, u, sch, _hash(stage, self.rv, self.models[tier], self.effort.get(stage), system, u)) for s, a, u, sch in jobs}
         out: dict[str, tuple[dict | None, int | None]] = {}
         by_hash = {k[3]: s for s, k in keyed.items()}
         with db.connect() as c:
