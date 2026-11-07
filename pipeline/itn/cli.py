@@ -158,6 +158,9 @@ def _dry_run(args) -> None:
 
     rubric = load_rubric()
     stages, out = rubric["stages"], []
+    run = rubric.get("run", {})
+    opts = {"batch": bool(run.get("batch")), "caching": bool(run.get("prompt_caching"))}
+    mode = ", ".join(k for k, v in opts.items() if v) or "standard"
     r2 = R2()
     if args.pilot:
         anchors = load_anchors()
@@ -170,7 +173,12 @@ def _dry_run(args) -> None:
         conn.commit()
         items, sizes = est.gather(conn, r2, ids)
         out += est.report(f"Pilot: {len(ids)} calibration anchors (rubric v{rubric['version']},"
-                          f" max tier {args.max_tier})", est.plan(items, sizes, stages, args.max_tier))
+                          f" max tier {args.max_tier}, {mode})", est.plan(items, sizes, stages, args.max_tier, **opts))
+        if rubric.get("compare_stages"):
+            alt = {**stages, **rubric["compare_stages"]}
+            out += est.report("Pilot comparison pass with " + ", ".join(
+                f"{k} on {v}" for k, v in rubric["compare_stages"].items()),
+                est.plan(items, sizes, alt, args.max_tier, **opts))
         for it in items:
             tag = f"  [routine: {it.presort}]" if it.presort else ""
             out.append(f"    {it.id:28} {it.text_tokens:>8,} tok  {len(it.cited):>3} cites  {it.title[:60]}{tag}")
@@ -179,31 +187,35 @@ def _dry_run(args) -> None:
         print("\n".join(out), flush=True)
         out = []
     if args.sample:
-        grand = 0.0
+        grand = compare_total = 0.0
         for typ in ("scotus_case", "executive_document", "public_law"):
             conn = db.connect()  # each phase can outlast the database's idle timeout
             ids, total = est.sample_ids(conn, typ, args.sample)
             items, sizes = est.gather(conn, r2, ids)
-            e = est.plan(items, sizes, stages, args.max_tier)
+            e = est.plan(items, sizes, stages, args.max_tier, **opts)
             scale = total / max(len(items), 1)
             for k in e.usd:
                 e.usd[k] *= scale
                 e.calls[k] *= scale
             e.unloaded_cited = int(e.unloaded_cited * scale)
             e.digests = int(e.digests * scale)
-            out += est.report(f"All {total:,} in-scope {typ} (scaled from a sample of {len(items)};"
-                              " digests overcounted because shared precedents are counted once per sample item set)", e)
+            out += est.report(f"All {total:,} in-scope {typ} ({mode}; scaled from a sample of {len(items)})", e)
+            if rubric.get("compare_stages"):
+                c = est.plan(items, sizes, {**stages, **rubric["compare_stages"]}, args.max_tier, **opts)
+                out.append(f"  with the comparison settings: ${c.total * scale:,.2f}")
+                compare_total += c.total * scale
             grand += e.total
             print("\n".join(out), flush=True)
             out = []
         lo, hi = est.RANGE
-        out.append(f"== Full corpus, all types: ${grand:,.2f} (range ${grand * lo:,.2f} to ${grand * hi:,.2f};"
-                   f" Batch API about half)")
+        out.append(f"== Full corpus, all types ({mode}): ${grand:,.2f} (range ${grand * lo:,.2f} to ${grand * hi:,.2f})")
+        if compare_total:
+            out.append(f"== With the comparison settings: ${compare_total:,.2f}")
     if not args.pilot and not args.sample:
         conn = db.connect()
         ids = _scope_ids(conn, args)
         items, sizes = est.gather(conn, r2, ids)
-        out += est.report(f"Scope: {len(ids)} items", est.plan(items, sizes, stages, args.max_tier))
+        out += est.report(f"Scope: {len(ids)} items ({mode})", est.plan(items, sizes, stages, args.max_tier, **opts))
     print("\n".join(out))
     print("\nDry run: no model was called and nothing was spent. Prices are the published rates as of"
           " 2026-10-06; token counts are approximate.")
