@@ -125,6 +125,7 @@ def test_economy_path_one_pass_then_checks_and_second_pass_for_unusual(monkeypat
             "date": None, "summary": "", "type": "usc_section"}
     monkeypatch.setattr(data, "citations", lambda c, r2, i, t: [cite])
     monkeypatch.setattr(data, "analog_candidates", lambda c, i, n: [])
+    monkeypatch.setattr(data, "record_facts", lambda c, i: {})
     monkeypatch.setattr(data, "_text_keys", lambda c, a: ["k2"])
     monkeypatch.setattr(data, "same_actor_finals", lambda c, i, ids: {})
     dims = rubric["types"]["executive_document"]["dimensions"]
@@ -147,3 +148,24 @@ def test_economy_path_one_pass_then_checks_and_second_pass_for_unusual(monkeypat
     assert [s for s, _ in calls] == ["type_assessment", "citation_check", "verification"]
     assert calls[1][1] == ["eo/1->usc/8/1182"] and calls[2][1] == ["eo/1"]
     assert written[-1][:2] == ("eo/1", 4) and ("eo/2", 2, 1.0) in written
+
+
+def test_law_facts_votes_and_vehicle():
+    from itn.analyze import data
+
+    class Conn:
+        def execute(self, q, p):
+            return NS(fetchall=lambda: [("pl/109-171", "Deficit Reduction Act"), ("pl/111-152", "Health Care and Education Reconciliation Act")])
+
+        def commit(self):
+            pass
+    law = _item(id="pl/115-97", type="public_law", subtype=None, effective_date=dt.date(2017, 12, 22),
+                title="An act to provide for reconciliation pursuant to titles II and V",
+                metadata={"votes": [{"chamber": "Senate", "date": "2017-12-20", "yeas": 51, "nays": 48},
+                                    {"chamber": "House", "date": "2018-01-05", "yeas": 1, "nays": 0}]})
+    facts = data.record_facts(Conn(), law)
+    assert facts["final_passage_votes"] == [{"chamber": "Senate", "date": "2017-12-20", "yeas": 51, "nays": 48}]
+    assert "reconciliation" in facts["vehicle"] and ": 2" in facts["vehicle"]
+    user, _ = prompts.type_assessment(RUBRIC, law, "s", {}, {}, [], facts)
+    assert "Facts from the record" in user and "Authorities it relies on" in user
+    assert data.record_facts(Conn(), _item()) == {}

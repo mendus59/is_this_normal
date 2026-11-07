@@ -141,6 +141,7 @@ class Pipeline:
         with db.connect() as c:
             cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
             candidates = {i.id: data.analog_candidates(c, i) for i in items}
+            facts = {i.id: data.record_facts(c, i) for i in items}
 
         summaries = self.call("summary", [(i.id, i.as_of, *prompts.summary(i, texts[i.id])) for i in items])
         summary = {i.id: (summaries[i.id][0] or {}).get("summary") or (i.summary or i.title) for i in items}
@@ -180,7 +181,8 @@ class Pipeline:
             dg = {ct["to"]: material(ct) for ct in top}
             ck = {s.split("->", 1)[1]: (checks.get(s, (None,))[0] or {}).get("verdict")
                   for s in check_meta if s.startswith(i.id + "->")}
-            user, schema = prompts.type_assessment(self.rubric, i, summary[i.id], dg, ck, candidates[i.id])
+            user, schema = prompts.type_assessment(self.rubric, i, summary[i.id], dg, ck, candidates[i.id],
+                                                   facts[i.id])
             assess_users[i.id] = user
             allowed[i.id] = {i.id} | {ct["to"] for ct in cites[i.id]} | {cd["id"] for cd in candidates[i.id]}
             assess_jobs.append((i.id, i.as_of, user, schema))
@@ -229,6 +231,7 @@ class Pipeline:
             cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
             candidates = {i.id: [{**cd, "summary": cd["summary"][:e["analog_chars"]]}
                                  for cd in data.analog_candidates(c, i, e["analogs"])] for i in items}
+            facts = {i.id: data.record_facts(c, i) for i in items}
             wanted = {ct["to"] for i in items for ct in cites[i.id][:e["max_cited"]] if not ct["summary"]}
             keys = {a: data._text_keys(c, a) for a in wanted}
         free = {a: data.text_of(self.r2, k, e["cited_chars"]) for a, k in keys.items() if k}
@@ -245,7 +248,8 @@ class Pipeline:
         for i in items:
             top = cites[i.id][:e["max_cited"]]
             user, schema = prompts.type_assessment(self.rubric, i, item_material(i),
-                                                   {ct["to"]: material(ct) for ct in top}, {}, candidates[i.id])
+                                                   {ct["to"]: material(ct) for ct in top}, {}, candidates[i.id],
+                                                   facts[i.id])
             users[i.id] = user
             allowed[i.id] = {i.id} | {ct["to"] for ct in cites[i.id]} | {cd["id"] for cd in candidates[i.id]}
             jobs.append((i.id, i.as_of, user, schema))
