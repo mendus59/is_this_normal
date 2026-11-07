@@ -156,9 +156,17 @@ VEHICLES = {"reconciliation": "budget reconciliation", "continuing appropriation
             "consolidated appropriations": "an omnibus appropriations act"}
 
 
-def record_facts(conn, item: Item) -> dict:
-    """Free facts from the record that the text alone does not show: for laws, the
-    final-passage roll calls and how often the same legislative vehicle was used before."""
+_OVERRULE = re.compile(r"[^.]{0,200}\b(?:overrul(?:e|ed|es|ing)|abrogat(?:e|ed|es))\b[^.]{0,200}\.?", re.IGNORECASE)
+
+
+def record_facts(conn, item: Item, text: str | None = None) -> dict:
+    """Free facts from the record that a short excerpt may not show: for laws, the
+    final-passage roll calls and how often the same legislative vehicle was used before;
+    for rulings, every passage of the controlling opinion that speaks of overruling."""
+    if item.type == "scotus_case":
+        hits = [" ".join(m.group(0).split()) for m in _OVERRULE.finditer(text or "")]
+        hits = list(dict.fromkeys(hits))[:6]
+        return {"overruling_passages": hits or "none in the controlling opinion"} if text is not None else {}
     if item.type != "public_law":
         return {}
     facts: dict = {}

@@ -138,10 +138,11 @@ class Pipeline:
         if self.economy:
             return self._score_economy(items)
         texts = {i.id: data.text_of(self.r2, i.text_keys, data.TEXT_MAX_CHARS) for i in items}
+        full = {i.id: texts[i.id] for i in items if i.type == "scotus_case"}
         with db.connect() as c:
             cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
             candidates = {i.id: data.analog_candidates(c, i) for i in items}
-            facts = {i.id: data.record_facts(c, i) for i in items}
+            facts = {i.id: data.record_facts(c, i, full.get(i.id)) for i in items}
 
         summaries = self.call("summary", [(i.id, i.as_of, *prompts.summary(i, texts[i.id])) for i in items])
         summary = {i.id: (summaries[i.id][0] or {}).get("summary") or (i.summary or i.title) for i in items}
@@ -227,11 +228,13 @@ class Pipeline:
         citation checks and a second pass that sees the check verdicts."""
         e = self.economy
         texts = {i.id: data.text_of(self.r2, i.text_keys, e["item_chars"]) for i in items}
+        # Rulings: scan the whole controlling opinion (free) for overruling language.
+        full = {i.id: data.text_of(self.r2, i.text_keys, data.TEXT_MAX_CHARS) for i in items if i.type == "scotus_case"}
         with db.connect() as c:
             cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
             candidates = {i.id: [{**cd, "summary": cd["summary"][:e["analog_chars"]]}
                                  for cd in data.analog_candidates(c, i, e["analogs"])] for i in items}
-            facts = {i.id: data.record_facts(c, i) for i in items}
+            facts = {i.id: data.record_facts(c, i, full.get(i.id)) for i in items}
             wanted = {ct["to"] for i in items for ct in cites[i.id][:e["max_cited"]] if not ct["summary"]}
             keys = {a: data._text_keys(c, a) for a in wanted}
         free = {a: data.text_of(self.r2, k, e["cited_chars"]) for a, k in keys.items() if k}
