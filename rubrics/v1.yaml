@@ -111,3 +111,28 @@ stages:
   authority_digest: sonnet
   type_assessment: sonnet
   verification: opus
+
+# Economy setting: one Haiku pass per item, aimed at about $10 for the whole corpus
+# (proposed 2026-11-07; try it on the anchors first with --profile economy --compare).
+# No summary or digest calls: the assessment reads the item's free official summary or
+# syllabus plus the start of its text, and the free summaries of what it cites.
+# Citation checks run only for items the assessment rates unusual, and their verdicts
+# go into a second Haiku pass, so miscitations still count as evidence and are flagged.
+economy:
+  stages:
+    summary: haiku
+    citation_check: haiku
+    authority_digest: haiku
+    type_assessment: haiku
+    verification: haiku
+  effort:
+    citation_check: low
+    type_assessment: low
+    verification: low
+  item_chars: 24000
+  official_summary_chars: 12000
+  max_cited: 10
+  cited_chars: 800
+  analogs: 8
+  analog_chars: 300
+  max_checks: 5

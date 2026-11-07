@@ -116,3 +116,19 @@ def test_escalation_adds_cost_and_medium_effort_saves():
     high = est.plan(items, {"x": 5_000}, load_rubric()["stages"], "opus", effort={"type_assessment": "high"}).total
     med = est.plan(items, {"x": 5_000}, load_rubric()["stages"], "opus", effort={"type_assessment": "medium"}).total
     assert med < high
+
+
+def test_economy_plan_is_one_cheap_pass():
+    from itn.analyze import estimate as est
+    from itn.analyze.rubric import load_rubric
+
+    rubric = load_rubric()
+    items = [est.Item(id=f"scotus/{n}", type="scotus_case", title="x", text_tokens=40_000,
+                      cited=[f"scotus/c{k}" for k in range(30)]) for n in range(10)]
+    sizes = {f"scotus/c{k}": 20_000 for k in range(30)}
+    standard = est.plan(items, sizes, rubric["stages"], "opus", batch=True, caching=True, effort=rubric["effort"])
+    economy = est.plan_economy(items, rubric["economy"])
+    assert "summary" not in economy.calls and "authority_digest" not in economy.calls
+    assert economy.calls["type_assessment"] == 10
+    assert economy.total < standard.total / 20
+    assert set(rubric["economy"]["stages"].values()) == {"haiku"}

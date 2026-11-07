@@ -102,3 +102,48 @@ def test_budget_stops_before_overspend():
 def test_refusal_is_recorded_not_parsed():
     data, err = llm._parse(_msg({}, stop="refusal"))
     assert data is None and err == "refusal"
+
+
+def test_economy_path_one_pass_then_checks_and_second_pass_for_unusual(monkeypatch):
+    import contextlib
+    import datetime as dt
+
+    from itn.analyze import data, stages
+    from itn.analyze.rubric import load_rubric
+
+    rubric = load_rubric()
+    p = object.__new__(stages.Pipeline)
+    p.rubric, p.economy, p.compare, p.log = rubric, rubric["economy"], True, lambda m: None
+    p.stages = dict(rubric["economy"]["stages"])
+    p.r2 = NS(get_text=lambda k: "text " * 100)
+    monkeypatch.setattr(stages.db, "connect", lambda: contextlib.nullcontext(None))
+    item = data.Item("eo/1", "executive_document", "executive_order", "Odd order", dt.date(2020, 1, 2),
+                     None, {"president": "x"}, ["k"])
+    plain = data.Item("eo/2", "executive_document", "executive_order", "Plain order", dt.date(2020, 1, 3),
+                      None, {"president": "x"}, ["k"])
+    cite = {"citation_id": None, "to": "usc/8/1182", "context": "under 8 U.S.C. 1182(f)", "title": "8 U.S.C. 1182",
+            "date": None, "summary": "", "type": "usc_section"}
+    monkeypatch.setattr(data, "citations", lambda c, r2, i, t: [cite])
+    monkeypatch.setattr(data, "analog_candidates", lambda c, i, n: [])
+    monkeypatch.setattr(data, "_text_keys", lambda c, a: ["k2"])
+    monkeypatch.setattr(data, "same_actor_finals", lambda c, i, ids: {})
+    dims = rubric["types"]["executive_document"]["dimensions"]
+
+    def rated(r):
+        return {"dimensions": {k: {"rating": r, "rating_independent": r, "evidence": ["usc/8/1182"], "reason": ""}
+                               for k in dims}}
+    calls, written = [], []
+
+    def fake_call(stage, jobs):
+        calls.append((stage, [j[0] for j in jobs]))
+        if stage == "type_assessment":
+            return {"eo/1": (rated(0), 1), "eo/2": (rated(4), 2)}
+        if stage == "citation_check":
+            return {j[0]: ({"verdict": "supports", "reason": ""}, 3) for j in jobs}
+        return {j[0]: (rated(1), 4) for j in jobs}
+    p.call = fake_call
+    p._write_score = lambda i, aid, d, raw, conf, c=None: written.append((i.id, aid, raw))
+    p._score_economy([item, plain])
+    assert [s for s, _ in calls] == ["type_assessment", "citation_check", "verification"]
+    assert calls[1][1] == ["eo/1->usc/8/1182"] and calls[2][1] == ["eo/1"]
+    assert written[-1][:2] == ("eo/1", 4) and ("eo/2", 2, 1.0) in written
