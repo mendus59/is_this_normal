@@ -78,6 +78,18 @@ models:
   sonnet: claude-sonnet-5-5
   opus: claude-opus-5-5
 
+# Cost settings (approved 2026-11-07). Batch: results within hours at half price.
+# Caching: the shared rubric prefix is billed at a tenth after the first call.
+run:
+  batch: true
+  prompt_caching: true
+
+# Cheaper settings tried side by side on the calibration anchors in the pilot. They
+# replace `stages` only if the anchors land in the same bands.
+compare_stages:
+  authority_digest: haiku
+  verification: sonnet
+
 stages:
   summary: haiku
   citation_check: haiku

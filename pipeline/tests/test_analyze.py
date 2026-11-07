@@ -46,6 +46,13 @@ def test_presort():
     assert routine_reason("proclamation", "Adjusting Imports of Steel Into the United States") is None
     assert routine_reason("proclamation", "Declaring a National Emergency Concerning the Southern Border of the United States") is None
     assert routine_reason("executive_order", "Improving the Nation's Cybersecurity") is None
+    assert routine_reason("memorandum", "Presidential Determination on Refugee Admissions for Fiscal Year 2016")
+    assert routine_reason("executive_order", "Adjustments of Certain Rates of Pay")
+    assert routine_reason("executive_order", "Providing for the Closing of Executive Departments and Agencies of the Federal Government on December 24, 2019")
+    assert routine_reason("proclamation", "To Implement the United States-Korea Free Trade Agreement")
+    assert routine_reason("proclamation", "To Modify Duty-Free Treatment Under the Generalized System of Preferences")
+    assert routine_reason("executive_order", "Regulating Imports With a Reciprocal Tariff To Rectify Trade Practices") is None
+    assert routine_reason("proclamation", "Adjusting Imports of Aluminum Into the United States") is None
 
 
 def test_plan_counts_shared_digests_once():
@@ -82,3 +89,18 @@ def test_digests_limited_to_most_cited_per_item():
     e = est.plan([est.Item("a", "scotus_case", "A", 1_000, many)], {c: 1_000 for c in many},
                  load_rubric()["stages"], "opus")
     assert e.digests == est.DIGESTS_IN_ASSESSMENT
+
+
+def test_batch_and_caching_lower_cost():
+    items = [est.Item("a", "scotus_case", "A", 20_000, ["x"])]
+    stages = load_rubric()["stages"]
+    base = est.plan(items, {"x": 5_000}, stages, "opus").total
+    batch = est.plan(items, {"x": 5_000}, stages, "opus", batch=True).total
+    both = est.plan(items, {"x": 5_000}, stages, "opus", batch=True, caching=True).total
+    assert abs(batch - base / 2) < 1e-9 and both < batch
+
+
+def test_rubric_cost_settings():
+    r = load_rubric()
+    assert r["run"] == {"batch": True, "prompt_caching": True}
+    assert r["compare_stages"] == {"authority_digest": "haiku", "verification": "sonnet"}
