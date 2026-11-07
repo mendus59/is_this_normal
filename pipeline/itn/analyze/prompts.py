@@ -65,26 +65,19 @@ def citation_check(item, cite: dict, cited_material: str) -> tuple[str, dict]:
     return user, _obj({"verdict": {"type": "string", "enum": VERDICTS}, "reason": _STR})
 
 
-def analog_assessment(item, item_summary: str, candidates: list[dict]) -> tuple[str, dict]:
-    user = (f"Item {item.id} ({item.type}) by {item.actor}, as of {item.as_of}: {item.title}\n"
-            f"Summary: {item_summary}\n\nEarlier candidates:\n{json.dumps(candidates, indent=1)}\n\n"
-            "Which candidates did the same kind of thing? How close is the closest one from a "
-            "different actor?")
-    analog = _obj({"id": _STR, "similarity": {"type": "number"}, "note": _STR})
-    return user, _obj({"analogs": {"type": "array", "items": analog}, "assessment": _STR})
-
-
 def type_assessment(rubric: dict, item, item_summary: str, digests: dict, checks: dict,
-                    analogs: dict, same_actor_ids: list[str]) -> tuple[str, dict]:
+                    candidates: list[dict]) -> tuple[str, dict]:
     dims = rubric["types"][item.type]["dimensions"]
     questions = "\n".join(f"- {k}: {q}" for k, q in dims.items())
     user = (f"Item {item.id} ({item.type}) by {item.actor}, as of {item.as_of}: {item.title}\n"
             f"Summary: {item_summary}\n\n"
             f"Authorities it relies on (digests):\n{json.dumps(digests, indent=1)}\n\n"
             f"Citation checks:\n{json.dumps(checks, indent=1)}\n\n"
-            f"Analogs:\n{json.dumps(analogs, indent=1)}\n\n"
-            f"Same-actor items in this material: {same_actor_ids or 'none'}\n\n"
-            f"Rate each dimension 0-4 (or -1 if insufficient):\n{questions}")
+            f"Comparable earlier items (same_actor marks the same Court, president or Congress):\n"
+            f"{json.dumps(candidates, indent=1)}\n\n"
+            "First decide which of these did the same kind of thing and how close the closest one "
+            "from a different actor is. Then rate each dimension 0-4 (or -1 if insufficient):\n"
+            f"{questions}")
     dim = _obj({"rating": _RATING, "rating_independent": _RATING, "evidence": _IDS, "reason": _STR})
     return user, _obj({"dimensions": _obj({k: dim for k in dims}), "note": _STR})
 

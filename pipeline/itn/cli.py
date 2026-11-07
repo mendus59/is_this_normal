@@ -159,8 +159,10 @@ def _dry_run(args) -> None:
     rubric = load_rubric()
     stages, out = rubric["stages"], []
     run = rubric.get("run", {})
-    opts = {"batch": bool(run.get("batch")), "caching": bool(run.get("prompt_caching"))}
-    mode = ", ".join(k for k, v in opts.items() if v) or "standard"
+    flags = {"batch": bool(run.get("batch")), "caching": bool(run.get("prompt_caching"))}
+    mode = ", ".join(k for k, v in flags.items() if v) or "standard"
+    opts = {**flags, "effort": rubric.get("effort")}
+    esc = (rubric.get("compare_escalate") or {}).get("to")
     r2 = R2()
     if args.pilot:
         anchors = load_anchors()
@@ -177,8 +179,9 @@ def _dry_run(args) -> None:
         if rubric.get("compare_stages"):
             alt = {**stages, **rubric["compare_stages"]}
             out += est.report("Pilot comparison pass with " + ", ".join(
-                f"{k} on {v}" for k, v in rubric["compare_stages"].items()),
-                est.plan(items, sizes, alt, args.max_tier, **opts))
+                f"{k} on {v}" for k, v in rubric["compare_stages"].items())
+                + (f", low scores re-assessed on {esc}" if esc else ""),
+                est.plan(items, sizes, alt, args.max_tier, escalate_to=esc, **opts))
         for it in items:
             tag = f"  [routine: {it.presort}]" if it.presort else ""
             out.append(f"    {it.id:28} {it.text_tokens:>8,} tok  {len(it.cited):>3} cites  {it.title[:60]}{tag}")
@@ -201,7 +204,8 @@ def _dry_run(args) -> None:
             e.digests = int(e.digests * scale)
             out += est.report(f"All {total:,} in-scope {typ} ({mode}; scaled from a sample of {len(items)})", e)
             if rubric.get("compare_stages"):
-                c = est.plan(items, sizes, {**stages, **rubric["compare_stages"]}, args.max_tier, **opts)
+                c = est.plan(items, sizes, {**stages, **rubric["compare_stages"]}, args.max_tier,
+                             escalate_to=esc, **opts)
                 out.append(f"  with the comparison settings: ${c.total * scale:,.2f}")
                 compare_total += c.total * scale
             grand += e.total

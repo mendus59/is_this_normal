@@ -78,6 +78,15 @@ models:
   sonnet: claude-sonnet-5-5
   opus: claude-opus-5-5
 
+# Comparable earlier items are read directly by the assessment (no separate analog call),
+# and the assessment runs at medium effort (approved 2026-11-07).
+effort:
+  summary: low
+  authority_digest: medium
+  citation_check: low
+  type_assessment: medium
+  verification: high
+
 # Cost settings (approved 2026-11-07). Batch: results within hours at half price.
 # Caching: the shared rubric prefix is billed at a tenth after the first call.
 run:
@@ -89,11 +98,16 @@ run:
 compare_stages:
   authority_digest: haiku
   verification: sonnet
+  type_assessment: haiku
+# In the comparison, Haiku assesses first and items it scores low are re-assessed on Sonnet.
+compare_escalate:
+  to: sonnet
+  if_raw_below: 0.6
+  if_any_final_at_most: 2
 
 stages:
   summary: haiku
   citation_check: haiku
   authority_digest: sonnet
-  analog_assessment: sonnet
   type_assessment: sonnet
   verification: opus

@@ -48,7 +48,7 @@ def test_merge_lowers_confidence_on_disagreement():
 
 
 def test_assessment_schema_lists_every_dimension():
-    _, schema = prompts.type_assessment(RUBRIC, _item(), "s", {}, {}, {}, [])
+    _, schema = prompts.type_assessment(RUBRIC, _item(), "s", {}, {}, [])
     assert set(schema["properties"]["dimensions"]["required"]) == set(RUBRIC["types"]["executive_document"]["dimensions"])
 
 
