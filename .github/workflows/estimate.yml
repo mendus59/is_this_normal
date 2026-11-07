@@ -17,7 +17,9 @@ on:
         options: [haiku, sonnet, opus]
         default: opus
 
-concurrency: pipeline
+# Own queue: a pending data load must not cancel a pending analysis, and analysis
+# writes only analysis, score and run rows.
+concurrency: analysis
 
 jobs:
   estimate:
