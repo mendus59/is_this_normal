@@ -219,7 +219,7 @@ class Pipeline:
             with db.connect() as c:
                 finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
             dims2, _, _ = combine(self.rubric, i, second["dimensions"], allowed[i.id], finals)
-            dims, raw, conf = merge(dims, dims2, conf)
+            dims, raw, conf = merge(dims, dims2, conf, cap_of(self.rubric))
             self._write_score(i, vid, dims, raw, conf)
 
     def _score_economy(self, items) -> None:
@@ -299,7 +299,7 @@ class Pipeline:
             with db.connect() as c:
                 finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
             dims2, _, _ = combine(self.rubric, i, second["dimensions"], allowed[i.id], finals)
-            dims, raw, conf = merge(dims, dims2, conf)
+            dims, raw, conf = merge(dims, dims2, conf, cap_of(self.rubric))
             self._write_score(i, vid, dims, raw, conf)
 
     def _escalate(self, items, assessed, assess_jobs, allowed):
@@ -413,10 +413,25 @@ def combine(rubric: dict, item, out_dims: dict, allowed: set[str], same_actor: d
     valid = [d["final"] for d in dims.values() if d["final"] >= 0]
     if not valid:
         return dims, None, 0.0
-    return dims, sum(valid) / len(valid) / 4, len(valid) / len(dims)
+    return dims, overall(valid, cap_of(rubric)), len(valid) / len(dims)
 
 
-def merge(first: dict, second: dict, confidence: float):
+def cap_of(rubric: dict) -> int | None:
+    return (rubric.get("combine") or {}).get("max_bands_above_worst")
+
+
+def overall(finals: list[int], cap: int | None = None) -> float:
+    """Equal-weight mean on 0-1. With `cap`, the result's band is at most `cap` bands
+    above the worst dimension's band (bands are 20 points wide, rating r sits in band r)."""
+    raw = sum(finals) / len(finals) / 4
+    if cap is not None:
+        ceiling = (min(finals) + cap + 1) * 0.2 - 0.001
+        if ceiling < 1:
+            raw = min(raw, ceiling)
+    return raw
+
+
+def merge(first: dict, second: dict, confidence: float, cap: int | None = None):
     """Two independent passes: average each dimension (rounding toward less normal) and
     lower confidence when they differ by two or more points."""
     dims, disagree = {}, False
@@ -429,6 +444,6 @@ def merge(first: dict, second: dict, confidence: float):
             final = floor((a["final"] + b["final"]) / 2)
         dims[name] = {**a, "final": final, "second_pass": b["final"]}
     valid = [d["final"] for d in dims.values() if d["final"] >= 0]
-    raw = sum(valid) / len(valid) / 4 if valid else 0.0
+    raw = overall(valid, cap) if valid else 0.0
     conf = len(valid) / len(dims) * (DISAGREEMENT_CONFIDENCE if disagree else 1.0)
     return dims, raw, min(confidence, conf) if disagree else conf
