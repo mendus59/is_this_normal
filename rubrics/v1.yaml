@@ -42,6 +42,11 @@ same_actor:
 citation_flags: {use_as: evidence, publish_flag: true, require_two_passes: true}
 
 weights: equal                     # version 1; tuned against calibration anchors later
+# The overall band can be at most this many bands above the worst dimension's band, so
+# one extreme departure (overruling a major precedent) is not averaged away.
+# Proposed 2026-11-07, awaiting Patrick's decision.
+combine:
+  max_bands_above_worst: 1
 
 verification:
   second_pass_bands: [novel, unprecedented]

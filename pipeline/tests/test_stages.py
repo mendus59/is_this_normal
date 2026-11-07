@@ -179,3 +179,12 @@ def test_scotus_overruling_passages():
     text = "Held: The Constitution does not confer a right to abortion. Roe and Casey are overruled. Other text."
     assert data.record_facts(None, case, text)["overruling_passages"] == ["Roe and Casey are overruled."]
     assert data.record_facts(None, case, "Nothing here.")["overruling_passages"].startswith("none")
+
+
+def test_overall_cap_above_worst():
+    from itn.analyze.stages import overall
+
+    assert overall([0, 3, 3, 3, 4]) == pytest.approx(0.65)          # plain mean: ordinary
+    assert overall([0, 3, 3, 3, 4], cap=1) < 0.40                    # at most novel
+    assert overall([3, 4, 4], cap=1) == overall([3, 4, 4])           # no effect near the top
+    assert overall([2, 2, 2], cap=1) == pytest.approx(0.5)
