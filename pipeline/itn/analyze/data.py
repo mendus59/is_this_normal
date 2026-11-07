@@ -169,6 +169,17 @@ def record_facts(conn, item: Item) -> dict:
             for v in votes]
     else:
         facts["final_passage_votes"] = "none recorded (passed by voice vote or unanimous consent)"
+    # How large it is next to earlier substantive laws, by the length of the CRS summary.
+    size = len(item.summary or "")
+    if size:
+        row = conn.execute(
+            "SELECT count(*) FILTER (WHERE length(official_summary) < %s), count(*) FROM artifact"
+            " WHERE type = 'public_law' AND in_scope AND id <> %s AND effective_date <= %s"
+            " AND official_summary IS NOT NULL", (size, item.id, item.as_of)).fetchone()
+        conn.commit()
+        if row and row[1]:
+            facts["size_percentile"] = (f"{round(100 * row[0] / row[1])} (its official summary is longer than"
+                                        f" that of {row[0]} of {row[1]} earlier substantive laws)")
     low = item.title.lower()
     for key, name in VEHICLES.items():
         if key in low:
