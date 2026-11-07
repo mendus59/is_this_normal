@@ -117,31 +117,70 @@ def citations(conn, r2, item: Item, text: str | None = None) -> list[dict]:
 
 
 def analog_candidates(conn, item: Item, limit: int = 12) -> list[dict]:
-    """Earlier items of the same type that look most alike by title and summary, with
-    their actor, so the model can weigh the same actor's own history less."""
+    """Earlier items of the same type that look most alike, with their actor, so the model
+    can weigh the same actor's own history less. Half come from title matches alone (so a
+    long summary cannot crowd out laws of the same kind, like earlier reconciliation acts),
+    the rest from title and summary."""
     words = []
     for w in _WORD.findall(f"{item.title} {item.summary or ''}"[:4000].lower()):
         if w not in _STOP and w not in words:
             words.append(w)
-    if not words:
-        return []
-    query = " | ".join(words[:24])
-    rows = conn.execute(
-        "SELECT id, type, title, effective_date, official_summary, metadata,"
-        " ts_rank(to_tsvector('english', title || ' ' || coalesce(official_summary, '')),"
-        "         to_tsquery('english', %s)) AS rank"
-        " FROM artifact WHERE type = %s AND in_scope AND id <> %s AND effective_date <= %s"
-        " AND to_tsvector('english', title || ' ' || coalesce(official_summary, '')) @@ to_tsquery('english', %s)"
-        " ORDER BY rank DESC, effective_date DESC LIMIT %s",
-        (query, item.type, item.id, item.as_of, query, limit)).fetchall()
+    title_words = [w for w in words if w in item.title.lower()]
+    found: dict[str, tuple] = {}
+    for fields, ws, n in (("title", title_words, limit // 2),
+                          ("title || ' ' || coalesce(official_summary, '')", words, limit)):
+        if not ws:
+            continue
+        query = " | ".join(ws[:24])
+        rows = conn.execute(
+            "SELECT id, type, title, effective_date, official_summary, metadata FROM artifact"
+            f" WHERE type = %s AND in_scope AND id <> %s AND effective_date <= %s"
+            f" AND to_tsvector('english', {fields}) @@ to_tsquery('english', %s)"
+            f" ORDER BY ts_rank(to_tsvector('english', {fields}), to_tsquery('english', %s)) DESC,"
+            " effective_date DESC LIMIT %s",
+            (item.type, item.id, item.as_of, query, query, n)).fetchall()
+        for r in rows:
+            if len(found) < limit:
+                found.setdefault(r[0], r)
     conn.commit()
     me = item.actor
     out = []
-    for aid, typ, title, date, summary, meta, _ in rows:
+    for aid, typ, title, date, summary, meta in found.values():
         who = actor(typ, aid, date, meta or {})
         out.append({"id": aid, "title": title, "date": date.isoformat(), "actor": who,
                     "same_actor": bool(me and who == me), "summary": (summary or "")[:1500]})
     return out
+
+
+VEHICLES = {"reconciliation": "budget reconciliation", "continuing appropriations": "a continuing resolution",
+            "consolidated appropriations": "an omnibus appropriations act"}
+
+
+def record_facts(conn, item: Item) -> dict:
+    """Free facts from the record that the text alone does not show: for laws, the
+    final-passage roll calls and how often the same legislative vehicle was used before."""
+    if item.type != "public_law":
+        return {}
+    facts: dict = {}
+    votes = [v for v in (item.metadata.get("votes") or []) if (v.get("date") or "") <= item.as_of.isoformat()]
+    if votes:
+        facts["final_passage_votes"] = [
+            {"chamber": v.get("chamber"), "date": v.get("date"), "yeas": v.get("yeas"), "nays": v.get("nays")}
+            for v in votes]
+    else:
+        facts["final_passage_votes"] = "none recorded (passed by voice vote or unanimous consent)"
+    low = item.title.lower()
+    for key, name in VEHICLES.items():
+        if key in low:
+            rows = conn.execute(
+                "SELECT id, title FROM artifact WHERE type = 'public_law' AND id <> %s"
+                " AND effective_date <= %s AND title ILIKE %s ORDER BY effective_date",
+                (item.id, item.as_of, f"%{key}%")).fetchall()
+            conn.commit()
+            facts["vehicle"] = (f"Enacted through {name}. Earlier laws since 2000 enacted the same way:"
+                                f" {len(rows)}" + (f" (e.g. {', '.join(r[0] for r in rows[-6:])})" if rows else ""))
+            break
+    return facts
 
 
 def same_actor_finals(conn, item: Item, ids: list[str]) -> dict[str, dict]:

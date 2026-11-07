@@ -68,12 +68,13 @@ def citation_check(item, cite: dict, cited_material: str) -> tuple[str, dict]:
 
 
 def type_assessment(rubric: dict, item, item_summary: str, digests: dict, checks: dict,
-                    candidates: list[dict]) -> tuple[str, dict]:
+                    candidates: list[dict], facts: dict | None = None) -> tuple[str, dict]:
     dims = rubric["types"][item.type]["dimensions"]
     questions = "\n".join(f"- {k}: {q}" for k, q in dims.items())
     user = (f"Item {item.id} ({item.type}) by {item.actor}, as of {item.as_of}: {item.title}\n"
             f"Summary: {item_summary}\n\n"
-            f"Authorities it relies on (digests):\n{json.dumps(digests, indent=1)}\n\n"
+            + (f"Facts from the record:\n{json.dumps(facts, indent=1)}\n\n" if facts else "")
+            + f"Authorities it relies on (digests):\n{json.dumps(digests, indent=1)}\n\n"
             f"Citation checks:\n{json.dumps(checks, indent=1)}\n\n"
             f"Comparable earlier items (same_actor marks the same Court, president or Congress):\n"
             f"{json.dumps(candidates, indent=1)}\n\n"
