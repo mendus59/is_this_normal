@@ -39,7 +39,7 @@ VERIFY_OUT = 2_000
 RANGE = (0.7, 1.6)
 EYECITE_MAX_CHARS = 300_000
 
-CONTROLLING = {"majority", "plurality", "unanimous", "opinion", "per_curiam", "lead", "syllabus"}
+CONTROLLING = {"majority", "plurality", "unanimous", "opinion", "per_curiam", "lead", "syllabus", "text"}
 
 
 CACHE_READ = 0.1      # cached input costs a tenth of the input price
