@@ -60,7 +60,7 @@ def run(conn, r2, max_minutes: float = 95, **_) -> int:
         if time.monotonic() > deadline:
             print(f"Time budget reached at {aid}; resuming next run", flush=True)
             break
-        text = r2.get_text(key) or ""
+        text = (r2.get_text(key) or "").replace("\x00", "")  # Postgres text cannot hold NUL bytes
         comp = {"id": ids.component(aid, 0, "text"), "artifact_id": aid, "kind": "text",
                 "author": None, "joined_by": [], "ord": 0, "text_key": key}
         rows = rows_for(text, date.isoformat() if date else None, aid)
