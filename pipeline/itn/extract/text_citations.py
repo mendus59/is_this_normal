@@ -62,7 +62,7 @@ def run(conn, r2, max_minutes: float = 95, **_) -> int:
             break
         text = r2.get_text(key) or ""
         comp = {"id": ids.component(aid, 0, "text"), "artifact_id": aid, "kind": "text",
-                "author": None, "joined_by": None, "ord": 0, "text_key": key}
+                "author": None, "joined_by": [], "ord": 0, "text_key": key}
         rows = rows_for(text, date.isoformat() if date else None, aid)
         db.upsert_component(conn, comp)
         db.replace_citations(conn, comp["id"], EXTRACTOR, rows)
