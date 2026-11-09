@@ -142,7 +142,7 @@ class Pipeline:
         with db.connect() as c:
             cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
             candidates = {i.id: data.analog_candidates(c, i) for i in items}
-            facts = {i.id: data.record_facts(c, i, full.get(i.id)) for i in items}
+            facts = {i.id: data.record_facts(c, i, full.get(i.id), [ct["to"] for ct in cites[i.id]]) for i in items}
 
         summaries = self.call("summary", [(i.id, i.as_of, *prompts.summary(i, texts[i.id])) for i in items])
         summary = {i.id: (summaries[i.id][0] or {}).get("summary") or (i.summary or i.title) for i in items}
@@ -200,6 +200,7 @@ class Pipeline:
             with db.connect() as c:
                 finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
             dims, raw, conf = combine(self.rubric, i, out["dimensions"], allowed[i.id], finals)
+            dims, raw, conf = apply_rules(self.rubric, i, dims, raw, conf, facts[i.id])
             if raw is None:
                 continue
             prelim[i.id] = (dims, raw, conf, aid)
@@ -220,6 +221,7 @@ class Pipeline:
                 finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
             dims2, _, _ = combine(self.rubric, i, second["dimensions"], allowed[i.id], finals)
             dims, raw, conf = merge(dims, dims2, conf, cap_of(self.rubric))
+            dims, raw, conf = apply_rules(self.rubric, i, dims, raw, conf, facts[i.id])
             self._write_score(i, vid, dims, raw, conf)
 
     def _score_economy(self, items) -> None:
@@ -234,7 +236,7 @@ class Pipeline:
             cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
             candidates = {i.id: [{**cd, "summary": cd["summary"][:e["analog_chars"]]}
                                  for cd in data.analog_candidates(c, i, e["analogs"])] for i in items}
-            facts = {i.id: data.record_facts(c, i, full.get(i.id)) for i in items}
+            facts = {i.id: data.record_facts(c, i, full.get(i.id), [ct["to"] for ct in cites[i.id]]) for i in items}
             wanted = {ct["to"] for i in items for ct in cites[i.id][:e["max_cited"]] if not ct["summary"]}
             keys = {a: data._text_keys(c, a) for a in wanted}
         free = {a: data.text_of(self.r2, k, e["cited_chars"]) for a, k in keys.items() if k}
@@ -266,6 +268,7 @@ class Pipeline:
             with db.connect() as c:
                 finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
             dims, raw, conf = combine(self.rubric, i, out["dimensions"], allowed[i.id], finals)
+            dims, raw, conf = apply_rules(self.rubric, i, dims, raw, conf, facts[i.id])
             if raw is None:
                 continue
             prelim[i.id] = (dims, raw, conf)
@@ -291,6 +294,8 @@ class Pipeline:
             user = users[i.id] + (f"\n\nCitation checks:\n{json.dumps(ck, indent=1)}" if ck else "")
             vjobs.append((i.id, i.as_of, *prompts.verification(self.rubric, i, user, assessed[i.id][0])))
         vout = self.call("verification", vjobs)
+        vjobs_by = {j[0]: j for j in vjobs}
+        hard = []
         for i in unusual:
             second, vid = vout.get(i.id, (None, None))
             if not second:
@@ -300,7 +305,41 @@ class Pipeline:
                 finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
             dims2, _, _ = combine(self.rubric, i, second["dimensions"], allowed[i.id], finals)
             dims, raw, conf = merge(dims, dims2, conf, cap_of(self.rubric))
+            dims, raw, conf = apply_rules(self.rubric, i, dims, raw, conf, facts[i.id])
             self._write_score(i, vid, dims, raw, conf)
+            first = prelim[i.id][0]
+            if any(first[k]["final"] >= 0 and dims2[k]["final"] >= 0
+                   and abs(first[k]["final"] - dims2[k]["final"]) >= DISAGREEMENT for k in first if k in dims2):
+                hard.append((i, vjobs_by[i.id]))
+        self._settle_hard(hard, allowed, facts)
+
+    def _settle_hard(self, hard, allowed, facts) -> None:
+        """Economy profile with `escalate`: items whose two Haiku passes disagreed by two or
+        more points on a dimension are re-assessed once on the stronger tier, which settles
+        them (its rating replaces the merged one)."""
+        esc = (self.economy or {}).get("escalate") or {}
+        if not hard or not esc.get("to"):
+            if hard:
+                self.log(f"{len(hard)} items had passes that disagreed by {DISAGREEMENT}+ (no escalation set)")
+            return
+        saved = self.stages["verification"]
+        self.stages["verification"] = esc["to"]
+        try:
+            out = self.call("verification", [j for _, j in hard])
+        finally:
+            self.stages["verification"] = saved
+        for i, _ in hard:
+            third, tid = out.get(i.id, (None, None))
+            if not third:
+                continue
+            with db.connect() as c:
+                finals = data.same_actor_finals(c, i, sorted(allowed[i.id]))
+            dims, raw, conf = combine(self.rubric, i, third["dimensions"], allowed[i.id], finals)
+            if raw is None:
+                continue
+            dims, raw, conf = apply_rules(self.rubric, i, dims, raw, conf, facts[i.id])
+            self._write_score(i, tid, dims, raw, conf * DISAGREEMENT_CONFIDENCE)
+        self.log(f"settled {len(hard)} disputed items on {esc['to']}")
 
     def _escalate(self, items, assessed, assess_jobs, allowed):
         """Comparison runs: re-assess low first-pass scores on the escalation tier."""
@@ -414,6 +453,26 @@ def combine(rubric: dict, item, out_dims: dict, allowed: set[str], same_actor: d
     if not valid:
         return dims, None, 0.0
     return dims, overall(valid, cap_of(rubric)), len(valid) / len(dims)
+
+
+def apply_rules(rubric: dict, item, dims: dict, raw, conf, facts: dict):
+    """Fixed rules that replace a model judgment when the record settles it. Each rule
+    names its evidence. Today: a ruling whose controlling opinion expressly overrules
+    one of the Court's cases gets the rubric's rating on precedent."""
+    rules = rubric.get("rules") or {}
+    rating = rules.get("express_overruling_precedent")
+    passages = (facts or {}).get("expressly_overrules")
+    if item.type == "scotus_case" and rating is not None and passages and "precedent" in dims:
+        d = dims["precedent"]
+        if d["final"] < 0 or d["final"] > rating:
+            dims["precedent"] = {**d, "rating": rating, "rating_independent": rating, "final": rating,
+                                 "evidence": sorted(set(d.get("evidence") or []) | {item.id}),
+                                 "reason": f"Rule: the controlling opinion expressly overrules: {passages[0][:300]}",
+                                 "rule": "express_overruling"}
+            valid = [x["final"] for x in dims.values() if x["final"] >= 0]
+            raw = overall(valid, cap_of(rubric))
+            conf = max(conf, len(valid) / len(dims))
+    return dims, raw, conf
 
 
 def cap_of(rubric: dict) -> int | None:

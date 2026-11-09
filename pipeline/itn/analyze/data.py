@@ -159,17 +159,83 @@ VEHICLES = {"reconciliation": "budget reconciliation", "continuing appropriation
 _OVERRULE = re.compile(r"[^.]{0,200}\b(?:overrul(?:e|ed|es|ing)|abrogat(?:e|ed|es))\b[^.]{0,200}\.?", re.IGNORECASE)
 
 
-def record_facts(conn, item: Item, text: str | None = None) -> dict:
-    """Free facts from the record that a short excerpt may not show: for laws, the
-    final-passage roll calls and how often the same legislative vehicle was used before;
-    for rulings, every passage of the controlling opinion that speaks of overruling."""
+# An express, affirmative overruling ("Roe and Casey are overruled", "we overrule"), not
+# "we decline to overrule" or a plurality that "would overrule".
+_EXPRESS = re.compile(
+    r"\b(?:is|are|be|were|was|stands?)\s+(?:hereby\s+|now\s+|accordingly\s+|therefore\s+|thus\s+)?overruled\b"
+    r"|\bwe\s+(?:now\s+|therefore\s+|today\s+|hereby\s+)?overrule\b", re.IGNORECASE)
+_NEGATED = re.compile(r"\b(?:not|decline[sd]?|need not|should not|would not|cannot|no reason to|unnecessary to)\b"
+                      r"[^.]{0,60}$", re.IGNORECASE)
+
+# Statutes that give the President emergency or extraordinary powers. Invoking one is a
+# fact the procedure dimension weighs; it is not by itself a departure.
+EMERGENCY_STATUTES = {
+    "usc/50/1621": "National Emergencies Act", "usc/50/1622": "National Emergencies Act",
+    "usc/50/1631": "National Emergencies Act", "usc/50/1701": "IEEPA", "usc/50/1702": "IEEPA",
+    "usc/50/1703": "IEEPA", "usc/50/1704": "IEEPA", "usc/50/1705": "IEEPA",
+    "usc/8/1182": "INA 212(f) entry suspension", "usc/19/1862": "Section 232 (national security tariffs)",
+    "usc/19/2411": "Section 301 (trade retaliation)", "usc/19/2253": "Section 201 (safeguard tariffs)",
+    "usc/10/2808": "Military construction in a national emergency", "usc/10/12302": "Ready Reserve call-up",
+    "usc/50/4511": "Defense Production Act", "usc/42/5191": "Stafford Act emergency",
+}
+STATUTE_HISTORY_MAX = 8
+
+
+def express_overrulings(text: str) -> list[str]:
+    """Sentences in which the opinion itself overrules, free of negation."""
+    out = []
+    for m in _OVERRULE.finditer(text or ""):
+        sentence = " ".join(m.group(0).split())
+        e = _EXPRESS.search(sentence)
+        if e and not _NEGATED.search(sentence[:e.start()]):
+            out.append(sentence)
+    return list(dict.fromkeys(out))
+
+
+def statute_history(conn, item: Item, cited: list[str]) -> list[dict]:
+    """For each U.S. Code section the document cites: how many earlier in-scope documents
+    of the same type cited it, by how many different actors, and since when. Counts only
+    material dated on or before the as-of date."""
+    out = []
+    for sec in [c for c in cited if c.startswith("usc/")][:STATUTE_HISTORY_MAX]:
+        rows = conn.execute(
+            "SELECT DISTINCT a.id, a.effective_date, a.metadata FROM citation c"
+            " JOIN component f ON f.id = c.from_component JOIN artifact a ON a.id = f.artifact_id"
+            " WHERE c.to_artifact = %s AND a.type = %s AND a.in_scope AND a.id <> %s"
+            " AND a.effective_date <= %s ORDER BY a.effective_date", (sec, item.type, item.id, item.as_of)).fetchall()
+        actors = [actor(item.type, aid, d, m or {}) for aid, d, m in rows]
+        others = {a for a in actors if a and a != item.actor}
+        out.append({"section": sec, "earlier_items": len(rows), "earlier_by_other_actors": sum(1 for a in actors if a != item.actor),
+                    "other_actors": sorted(others), "first_use": rows[0][1].isoformat() if rows else None,
+                    "examples": [r[0] for r in rows[-3:]]})
+    conn.commit()
+    return out
+
+
+def record_facts(conn, item: Item, text: str | None = None, cited: list[str] | None = None) -> dict:
+    """Free facts from the record that a short excerpt may not show. Rulings: passages of
+    the controlling opinion that speak of overruling, and whether it expressly overrules.
+    Executive documents: emergency powers invoked and each cited statute's history of use.
+    Laws: final-passage roll calls, how often the same vehicle was used before, size."""
+    cited = cited or []
     if item.type == "scotus_case":
-        hits = [" ".join(m.group(0).split()) for m in _OVERRULE.finditer(text or "")]
+        if text is None:
+            return {}
+        hits = [" ".join(m.group(0).split()) for m in _OVERRULE.finditer(text)]
         hits = list(dict.fromkeys(hits))[:6]
-        return {"overruling_passages": hits or "none in the controlling opinion"} if text is not None else {}
+        express = express_overrulings(text)[:3]
+        return {"overruling_passages": hits or "none in the controlling opinion",
+                "expressly_overrules": express or False}
+    if item.type == "executive_document":
+        powers = sorted({EMERGENCY_STATUTES[c] for c in cited if c in EMERGENCY_STATUTES})
+        return {"emergency_powers_invoked": powers or "none of the listed emergency statutes",
+                "statute_history": statute_history(conn, item, cited)}
     if item.type != "public_law":
         return {}
     facts: dict = {}
+    usc = [c for c in cited if c.startswith("usc/")]
+    if usc:
+        facts["us_code_cited"] = {"sections": len(usc), "titles": len({c.split("/")[1] for c in usc})}
     votes = [v for v in (item.metadata.get("votes") or []) if (v.get("date") or "") <= item.as_of.isoformat()]
     if votes:
         facts["final_passage_votes"] = [

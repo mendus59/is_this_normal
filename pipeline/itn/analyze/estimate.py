@@ -135,9 +135,11 @@ def plan(items: list[Item], digest_sizes: dict[str, int], stages: dict, max_tier
 ECON_ASSESS_OUT = 1_200          # one short reason per dimension
 ECON_CHECK_IN = 1_000
 ECON_VERIFY_SHARE = 0.4          # items rated unusual: checked and given a second pass
+ECON_DISPUTE_SHARE = 0.25        # of those, passes that disagree by 2+ (settled on `escalate.to`)
 
 
-def plan_economy(items: list[Item], cfg: dict, batch: bool = True, caching: bool = True) -> Estimate:
+def plan_economy(items: list[Item], cfg: dict, batch: bool = True, caching: bool = True,
+                 escalate_to: str | None = None) -> Estimate:
     est = Estimate(items=items)
     hit = PROMPT if caching else 0
     eff = cfg.get("effort") or {}
@@ -153,8 +155,13 @@ def plan_economy(items: list[Item], cfg: dict, batch: bool = True, caching: bool
         checks = min(len(it.cited), cfg["max_checks"])
         est.add("citation_check", ECON_VERIFY_SHARE * checks,
                 ECON_VERIFY_SHARE * checks * c(ECON_CHECK_IN, CHECK_OUT, min(hit, ECON_CHECK_IN // 2), "citation_check"))
+        v_in = a_in + ECON_ASSESS_OUT + checks * 60
         est.add("verification", ECON_VERIFY_SHARE,
-                ECON_VERIFY_SHARE * c(a_in + ECON_ASSESS_OUT + checks * 60, ECON_ASSESS_OUT, hit, "verification"))
+                ECON_VERIFY_SHARE * c(v_in, ECON_ASSESS_OUT, hit, "verification"))
+        to = escalate_to or (cfg.get("escalate") or {}).get("to")
+        if to:
+            share = ECON_VERIFY_SHARE * ECON_DISPUTE_SHARE
+            est.add("escalation", share, share * _cost(to, v_in, ECON_ASSESS_OUT, hit, batch, "low"))
     return est
 
 
@@ -259,7 +266,7 @@ def report(title: str, est: Estimate) -> list[str]:
     lines = [f"== {title}",
              f"items: {len(est.items)}  pre-sorted routine: {sum(1 for i in est.items if i.presort)}"
              f"  authority digests: {est.digests}  cited but not loaded: {est.unloaded_cited}"]
-    for stage in ["summary", "citation_check", "authority_digest", "type_assessment", "verification"]:
+    for stage in ["summary", "citation_check", "authority_digest", "type_assessment", "verification", "escalation"]:
         if stage in est.calls:
             lines.append(f"  {stage:18} calls {est.calls[stage]:>9,.0f}   ${est.usd[stage]:>9,.2f}")
     lines.append(f"  total ${est.total:,.2f}  (range ${est.total * lo:,.2f} to ${est.total * hi:,.2f})")

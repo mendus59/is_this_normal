@@ -48,6 +48,12 @@ weights: equal                     # version 1; tuned against calibration anchor
 combine:
   max_bands_above_worst: 1
 
+# Fixed rules that settle a dimension from the record without a model judgment.
+# express_overruling_precedent: a ruling whose controlling opinion expressly overrules
+# one of the Court's cases ("Roe and Casey are overruled") is rated this on precedent.
+rules:
+  express_overruling_precedent: 0
+
 verification:
   second_pass_bands: [novel, unprecedented]
   model_tier: opus
@@ -142,3 +148,7 @@ economy:
   analogs: 8
   analog_chars: 300
   max_checks: 5
+  # Items whose two Haiku passes disagree by 2+ on a dimension can be settled once on a
+  # stronger tier. Off until a budget is approved; the estimate prints its cost.
+  escalate:
+    to: null
