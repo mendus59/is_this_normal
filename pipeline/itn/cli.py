@@ -195,7 +195,7 @@ def _dry_run(args) -> None:
         print("\n".join(out), flush=True)
         out = []
     if args.sample:
-        grand = compare_total = economy_total = 0.0
+        grand = compare_total = economy_total = escalated_total = 0.0
         for typ in ("scotus_case", "executive_document", "public_law"):
             conn = db.connect()  # each phase can outlast the database's idle timeout
             ids, total = est.sample_ids(conn, typ, args.sample)
@@ -217,6 +217,9 @@ def _dry_run(args) -> None:
                 ec = est.plan_economy(items, rubric["economy"], **flags)
                 out.append(f"  with the economy settings: ${ec.total * scale:,.2f}")
                 economy_total += ec.total * scale
+                es = est.plan_economy(items, rubric["economy"], escalate_to="sonnet", **flags)
+                out.append(f"  economy with disputed items settled on Sonnet: ${es.total * scale:,.2f}")
+                escalated_total += es.total * scale
             grand += e.total
             print("\n".join(out), flush=True)
             out = []
@@ -227,6 +230,7 @@ def _dry_run(args) -> None:
         if economy_total:
             out.append(f"== With the economy settings: ${economy_total:,.2f}"
                        f" (range ${economy_total * lo:,.2f} to ${economy_total * hi:,.2f})")
+            out.append(f"== Economy with disputed items settled on Sonnet: ${escalated_total:,.2f}")
     if not args.pilot and not args.sample:
         conn = db.connect()
         ids = _scope_ids(conn, args)

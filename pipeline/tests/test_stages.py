@@ -125,7 +125,7 @@ def test_economy_path_one_pass_then_checks_and_second_pass_for_unusual(monkeypat
             "date": None, "summary": "", "type": "usc_section"}
     monkeypatch.setattr(data, "citations", lambda c, r2, i, t: [cite])
     monkeypatch.setattr(data, "analog_candidates", lambda c, i, n: [])
-    monkeypatch.setattr(data, "record_facts", lambda c, i, t=None: {})
+    monkeypatch.setattr(data, "record_facts", lambda c, i, t=None, cited=None: {})
     monkeypatch.setattr(data, "_text_keys", lambda c, a: ["k2"])
     monkeypatch.setattr(data, "same_actor_finals", lambda c, i, ids: {})
     dims = rubric["types"]["executive_document"]["dimensions"]
@@ -150,6 +150,54 @@ def test_economy_path_one_pass_then_checks_and_second_pass_for_unusual(monkeypat
     assert written[-1][:2] == ("eo/1", 4) and ("eo/2", 2, 1.0) in written
 
 
+def test_economy_disputed_items_settle_on_stronger_tier(monkeypatch):
+    import contextlib
+    import datetime as dt
+
+    from itn.analyze import data, stages
+    from itn.analyze.rubric import load_rubric
+
+    rubric = load_rubric()
+    p = object.__new__(stages.Pipeline)
+    p.rubric, p.compare, p.log = rubric, True, lambda m: None
+    p.economy = {**rubric["economy"], "escalate": {"to": "sonnet"}}
+    p.stages = dict(rubric["economy"]["stages"])
+    p.r2 = NS(get_text=lambda k: "text " * 100)
+    monkeypatch.setattr(stages.db, "connect", lambda: contextlib.nullcontext(None))
+    item = data.Item("eo/1", "executive_document", "executive_order", "Odd order", dt.date(2020, 1, 2),
+                     None, {"president": "x"}, ["k"])
+    plain = data.Item("eo/2", "executive_document", "executive_order", "Plain order", dt.date(2020, 1, 3),
+                      None, {"president": "x"}, ["k"])
+    cite = {"citation_id": None, "to": "usc/8/1182", "context": "under 8 U.S.C. 1182(f)", "title": "8 U.S.C. 1182",
+            "date": None, "summary": "", "type": "usc_section"}
+    monkeypatch.setattr(data, "citations", lambda c, r2, i, t: [cite])
+    monkeypatch.setattr(data, "analog_candidates", lambda c, i, n: [])
+    monkeypatch.setattr(data, "record_facts", lambda c, i, t=None, cited=None: {})
+    monkeypatch.setattr(data, "_text_keys", lambda c, a: ["k2"])
+    monkeypatch.setattr(data, "same_actor_finals", lambda c, i, ids: {})
+    dims = rubric["types"]["executive_document"]["dimensions"]
+
+    def rated(r):
+        return {"dimensions": {k: {"rating": r, "rating_independent": r, "evidence": ["usc/8/1182"], "reason": ""}
+                               for k in dims}}
+    calls, written, tiers = [], [], []
+
+    def fake_call(stage, jobs):
+        calls.append((stage, [j[0] for j in jobs]))
+        if stage == "type_assessment":
+            return {"eo/1": (rated(0), 1), "eo/2": (rated(4), 2)}
+        if stage == "citation_check":
+            return {j[0]: ({"verdict": "supports", "reason": ""}, 3) for j in jobs}
+        tiers.append(p.stages[stage])
+        return {j[0]: (rated(3), 4) for j in jobs}
+    p.call = fake_call
+    p._write_score = lambda i, aid, d, raw, conf, c=None: written.append((i.id, aid, raw))
+    p._score_economy([item, plain])
+    assert [s for s, _ in calls] == ["type_assessment", "citation_check", "verification", "verification"]
+    assert tiers == ["haiku", "sonnet"] and calls[3][1] == ["eo/1"]
+    assert written[-1][0] == "eo/1" and written[-1][2] == 0.75
+
+
 def test_law_facts_votes_and_vehicle():
     from itn.analyze import data
 
@@ -168,7 +216,8 @@ def test_law_facts_votes_and_vehicle():
     assert "reconciliation" in facts["vehicle"] and ": 2" in facts["vehicle"]
     user, _ = prompts.type_assessment(RUBRIC, law, "s", {}, {}, [], facts)
     assert "Facts from the record" in user and "Authorities it relies on" in user
-    assert data.record_facts(Conn(), _item()) == {}
+    eo = data.record_facts(Conn(), _item())
+    assert eo["emergency_powers_invoked"].startswith("none") and eo["statute_history"] == []
     assert facts["size_percentile"].startswith("90 ")
 
 
@@ -188,3 +237,43 @@ def test_overall_cap_above_worst():
     assert overall([0, 3, 3, 3, 4], cap=1) < 0.40                    # at most novel
     assert overall([3, 4, 4], cap=1) == overall([3, 4, 4])           # no effect near the top
     assert overall([2, 2, 2], cap=1) == pytest.approx(0.5)
+
+
+def test_express_overrulings_skip_negations():
+    from itn.analyze import data
+
+    text = ("We decline to overrule Smith. Roe and Casey are overruled. The dissent would not have Casey overruled. "
+            "Today we overrule Jones.")
+    got = data.express_overrulings(text)
+    assert got == ["Roe and Casey are overruled.", "Today we overrule Jones."]
+
+
+def test_statute_history_counts_other_presidents():
+    from itn.analyze import data
+
+    class Conn:
+        def execute(self, q, p):
+            rows = [("fr/a", dt.date(2005, 1, 1), {"president": "George W. Bush"}),
+                    ("fr/b", dt.date(2010, 1, 1), {"president": "Barack Obama"})]
+            return NS(fetchall=lambda: rows)
+
+        def commit(self):
+            pass
+    eo = _item(metadata={"president": "Donald Trump"})
+    facts = data.record_facts(Conn(), eo, None, ["usc/8/1182", "scotus/1-us-1"])
+    assert facts["emergency_powers_invoked"] == ["INA 212(f) entry suspension"]
+    h = facts["statute_history"][0]
+    assert h["earlier_items"] == 2 and h["earlier_by_other_actors"] == 2 and h["first_use"] == "2005-01-01"
+
+
+def test_express_overruling_rule_sets_precedent():
+    from itn.analyze.stages import apply_rules
+
+    case = _item(id="scotus/597-us-215", type="scotus_case", subtype=None)
+    dims = {k: {"rating": 3, "rating_independent": 3, "final": 3, "evidence": ["x"], "reason": ""}
+            for k in RUBRIC["types"]["scotus_case"]["dimensions"]}
+    out, raw, _ = apply_rules(RUBRIC, case, dims, 0.75, 1.0, {"expressly_overrules": ["Roe and Casey are overruled."]})
+    assert out["precedent"]["final"] == 0 and out["precedent"]["rule"] == "express_overruling"
+    assert raw < 0.40   # with the worst-plus-one cap: novel at most
+    same, raw2, _ = apply_rules(RUBRIC, case, dict(dims), 0.75, 1.0, {"expressly_overrules": False})
+    assert raw2 == 0.75
