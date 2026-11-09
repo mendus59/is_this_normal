@@ -18,6 +18,7 @@ def cmd_ingest(args) -> None:
         cap_scotus, cited_scotus, cited_usc, congress_laws, courtlistener_scotus, federal_register, scotus_bound,
         supremecourt_gov,
     )
+    from itn.extract import text_citations
     from itn.storage import R2
 
     r2 = None if args.no_text else R2()
@@ -36,6 +37,7 @@ def cmd_ingest(args) -> None:
             conn, r2=r2, fetch_text=not args.no_text, max_minutes=args.scotus_minutes),
         "cited-scotus": lambda conn: cited_scotus.run(
             conn, r2=r2, fetch_text=not args.no_text, max_minutes=args.scotus_minutes),
+        "text-citations": lambda conn: text_citations.run(conn, r2=r2, max_minutes=args.max_minutes),
         "cited-usc": lambda conn: cited_usc.run(
             conn, r2=r2, fetch_text=not args.no_text, max_minutes=args.scotus_minutes),
         "scotus": lambda conn: courtlistener_scotus.run(
@@ -327,7 +329,7 @@ def main(argv=None) -> None:
     sub.add_parser("migrate", help="apply database migrations").set_defaults(fn=cmd_migrate)
 
     ing = sub.add_parser("ingest", help="pull public records (free)")
-    ing.add_argument("sources", nargs="*", choices=["federal-register", "congress-laws", "scotus-bulk", "scotus-gov", "scotus-bound", "scotus", "cited-scotus", "cited-usc"])
+    ing.add_argument("sources", nargs="*", choices=["federal-register", "congress-laws", "scotus-bulk", "scotus-gov", "scotus-bound", "scotus", "cited-scotus", "text-citations", "cited-usc"])
     ing.add_argument("--since", type=int, help="Federal Register: first year to (re)ingest")
     ing.add_argument("--since-congress", type=int, help="Congress.gov: first Congress to (re)ingest")
     ing.add_argument("--since-term", type=int, help="supremecourt.gov: first October Term to (re)ingest")

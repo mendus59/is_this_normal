@@ -85,7 +85,7 @@ def build_details(conn) -> dict[str, dict]:
     for (cid, aid, kind, author, joined, text_key) in conn.execute(
             "SELECT id, artifact_id, kind, author, joined_by, text_key FROM component"
             " ORDER BY artifact_id, ord"):
-        if aid in arts:
+        if aid in arts and kind != "text":  # a document's single text is shown as the document
             arts[aid]["opinions"].append({"id": cid, "kind": kind, "author": author,
                                           "joined_by": joined, "text": text_key})
     titles = dict(conn.execute("SELECT id, title FROM artifact").fetchall())
