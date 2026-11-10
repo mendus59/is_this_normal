@@ -130,8 +130,8 @@ class Pipeline:
     def _score(self, ids: list[str]) -> None:
         with db.connect() as c:
             items = data.load_items(c, ids)
-        if not self.compare:
-            self._write_presorted([i for i in items if i.presort])
+        # Trial runs write them too (off the site) so calibration counts them.
+        self._write_presorted([i for i in items if i.presort])
         items = [i for i in items if not i.presort]
         if not items:
             return
