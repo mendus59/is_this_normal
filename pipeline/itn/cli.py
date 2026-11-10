@@ -326,6 +326,28 @@ def cmd_calibration(args) -> None:
         print(f"  run {r[0]} {r[1]} ${r[2]} rubric {r[3]}")
 
 
+def cmd_review(args) -> None:
+    """Free: export review packets for a session reviewer, or import its answers."""
+    from pathlib import Path
+
+    from itn.analyze import review
+    from itn.analyze.rubric import load_rubric
+
+    rubric = load_rubric()
+    if args.action == "export":
+        from itn.storage import R2
+        with db.connect() as conn:
+            ids = args.ids or review.select(conn, args.max_raw, args.min_confidence, args.type or None,
+                                            args.limit, args.reviewer)
+        print(f"Exporting {len(ids)} review packets", flush=True)
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        review.export(R2(), rubric, ids, out, log=lambda m: print(m, flush=True))
+    else:
+        review.import_answers(rubric, [Path(p) for p in args.packets], [Path(p) for p in args.answers],
+                              args.reviewer, log=lambda m: print(m, flush=True))
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="itn")
     sub = p.add_subparsers(dest="command", required=True)
@@ -368,6 +390,19 @@ def main(argv=None) -> None:
     an.add_argument("--sample", type=int, default=0,
                     help="dry run: also estimate every in-scope item from a random sample of this many per type")
     an.set_defaults(fn=cmd_analyze)
+
+    rv = sub.add_parser("review", help="session review packets and answers (free, no model API)")
+    rv.add_argument("action", choices=["export", "import"])
+    rv.add_argument("--reviewer", default="claude-fable-5-2 (session)", help="recorded as the score's model")
+    rv.add_argument("--ids", nargs="*", default=[], help="export: these ids instead of a selection")
+    rv.add_argument("--max-raw", type=float, default=0.6, help="export: current raw below this (0.6 = unusual or less normal)")
+    rv.add_argument("--min-confidence", type=float, default=0.0, help="export: or confidence below this")
+    rv.add_argument("--type", nargs="*", choices=["scotus_case", "public_law", "executive_document", "action_event"])
+    rv.add_argument("--limit", type=int, default=100)
+    rv.add_argument("--out", default="review-packets.jsonl")
+    rv.add_argument("--packets", nargs="*", default=[], help="import: packet files")
+    rv.add_argument("--answers", nargs="*", default=[], help="import: answer files")
+    rv.set_defaults(fn=cmd_review)
 
     args = p.parse_args(argv)
     args.fn(args)
