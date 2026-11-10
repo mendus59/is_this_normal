@@ -217,7 +217,7 @@ def test_law_facts_votes_and_vehicle():
     user, _ = prompts.type_assessment(RUBRIC, law, "s", {}, {}, [], facts)
     assert "Facts from the record" in user and "Authorities it relies on" in user
     eo = data.record_facts(Conn(), _item())
-    assert eo["emergency_powers_invoked"].startswith("none") and eo["statute_history"] == []
+    assert eo["emergency_powers_invoked"].startswith("none") and eo["rarely_used_provisions"] == "none"
     assert facts["size_percentile"].startswith("90 ")
 
 
@@ -262,8 +262,19 @@ def test_statute_history_counts_other_presidents():
     eo = _item(metadata={"president": "Donald Trump"})
     facts = data.record_facts(Conn(), eo, None, ["usc/8/1182", "scotus/1-us-1"])
     assert facts["emergency_powers_invoked"] == ["INA 212(f) entry suspension"]
-    h = facts["statute_history"][0]
+    h = facts["rarely_used_provisions"][0]
     assert h["earlier_items"] == 2 and h["earlier_by_other_actors"] == 2 and h["first_use"] == "2005-01-01"
+    assert "commonly_cited_provisions" not in facts
+
+
+def test_common_provisions_carry_no_counts():
+    from itn.analyze import data
+    hist = [{"section": "usc/8/1182", "earlier_items": 30, "earlier_by_other_actors": 29},
+            {"section": "usc/10/2808", "earlier_items": 1, "earlier_by_other_actors": 1}]
+    got = data.statute_facts(hist)
+    assert [h["section"] for h in got["rarely_used_provisions"]] == ["usc/10/2808"]
+    assert got["commonly_cited_provisions"]["sections"] == ["usc/8/1182"]
+    assert "29" not in str(got["commonly_cited_provisions"])
 
 
 def test_express_overruling_rule_sets_precedent():

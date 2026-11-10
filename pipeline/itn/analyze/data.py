@@ -212,6 +212,23 @@ def statute_history(conn, item: Item, cited: list[str]) -> list[dict]:
     return out
 
 
+RARE_USE = 3
+COMMON_NOTE = ("These provisions were cited often before. That shows the power exists, not that earlier"
+               " uses had this reach: judge scope and novelty from what this item itself does.")
+
+
+def statute_facts(history: list[dict]) -> dict:
+    """Split statute history so only rarity carries weight. A rarely used provision is a
+    real signal; a commonly cited one says little about whether this use is ordinary, and
+    raw counts led the model to rate sweeping uses of familiar powers as ordinary."""
+    rare = [h for h in history if h["earlier_by_other_actors"] <= RARE_USE]
+    common = [h["section"] for h in history if h["earlier_by_other_actors"] > RARE_USE]
+    out: dict = {"rarely_used_provisions": rare or "none"}
+    if common:
+        out["commonly_cited_provisions"] = {"sections": common, "note": COMMON_NOTE}
+    return out
+
+
 def record_facts(conn, item: Item, text: str | None = None, cited: list[str] | None = None) -> dict:
     """Free facts from the record that a short excerpt may not show. Rulings: passages of
     the controlling opinion that speak of overruling, and whether it expressly overrules.
@@ -229,7 +246,7 @@ def record_facts(conn, item: Item, text: str | None = None, cited: list[str] | N
     if item.type == "executive_document":
         powers = sorted({EMERGENCY_STATUTES[c] for c in cited if c in EMERGENCY_STATUTES})
         return {"emergency_powers_invoked": powers or "none of the listed emergency statutes",
-                "statute_history": statute_history(conn, item, cited)}
+                **statute_facts(statute_history(conn, item, cited))}
     if item.type != "public_law":
         return {}
     facts: dict = {}
