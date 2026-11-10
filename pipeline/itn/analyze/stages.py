@@ -40,7 +40,7 @@ def _hash(*parts) -> str:
 class Pipeline:
     def __init__(self, r2, client, rubric: dict, budget: float, max_tier: str, compare: bool = False,
                  dispatched_by: str | None = None, scope: dict | None = None, log=print,
-                 profile: str = "standard"):
+                 profile: str = "standard", record_run: bool = True):
         self.r2, self.client, self.rubric, self.log = r2, client, rubric, log
         self.compare = compare
         self.economy = rubric.get("economy") if profile == "economy" else None
@@ -61,6 +61,9 @@ class Pipeline:
         run_cfg = rubric.get("run", {})
         self.batch, self.caching = bool(run_cfg.get("batch")), bool(run_cfg.get("prompt_caching"))
         self.spend = Spend(budget)
+        self.run_id = None
+        if not record_run:     # free uses (review packets) call no model and log no run
+            return
         with db.connect() as c:
             self.run_id = c.execute(
                 "INSERT INTO run (dispatched_by, scope, budget_usd, dry_run) VALUES (%s, %s, %s, false)"
@@ -224,10 +227,9 @@ class Pipeline:
             dims, raw, conf = apply_rules(self.rubric, i, dims, raw, conf, facts[i.id])
             self._write_score(i, vid, dims, raw, conf)
 
-    def _score_economy(self, items) -> None:
-        """One Haiku assessment per item from free material (official summary or syllabus,
-        the start of the text, the free summaries of what it cites). Items rated unusual get
-        citation checks and a second pass that sees the check verdicts."""
+    def economy_inputs(self, items) -> dict:
+        """Everything the economy assessment sees, built only from free material dated on or
+        before each item's as-of date. Shared by paid runs and session review packets."""
         e = self.economy
         texts = {i.id: data.text_of(self.r2, i.text_keys, e["item_chars"]) for i in items}
         # Rulings: scan the whole controlling opinion (free) for overruling language.
@@ -249,15 +251,24 @@ class Pipeline:
             start = texts[i.id][: max(0, e["item_chars"] - len(official))]
             return f"{official}\n\nText (start):\n{start}" if official else f"Text (start):\n{start}"
 
-        users, jobs, allowed = {}, [], {}
+        users, schemas, allowed = {}, {}, {}
         for i in items:
             top = cites[i.id][:e["max_cited"]]
-            user, schema = prompts.type_assessment(self.rubric, i, item_material(i),
-                                                   {ct["to"]: material(ct) for ct in top}, {}, candidates[i.id],
-                                                   facts[i.id])
-            users[i.id] = user
+            users[i.id], schemas[i.id] = prompts.type_assessment(
+                self.rubric, i, item_material(i), {ct["to"]: material(ct) for ct in top}, {},
+                candidates[i.id], facts[i.id])
             allowed[i.id] = {i.id} | {ct["to"] for ct in cites[i.id]} | {cd["id"] for cd in candidates[i.id]}
-            jobs.append((i.id, i.as_of, user, schema))
+        return {"users": users, "schemas": schemas, "allowed": allowed, "facts": facts, "cites": cites,
+                "material": material}
+
+    def _score_economy(self, items) -> None:
+        """One Haiku assessment per item from free material (official summary or syllabus,
+        the start of the text, the free summaries of what it cites). Items rated unusual get
+        citation checks and a second pass that sees the check verdicts."""
+        inp = self.economy_inputs(items)
+        users, allowed, facts, cites, material = inp["users"], inp["allowed"], inp["facts"], inp["cites"], inp["material"]
+        e = self.economy
+        jobs = [(i.id, i.as_of, users[i.id], inp["schemas"][i.id]) for i in items]
         assessed = self.call("type_assessment", jobs)
 
         unusual, prelim = [], {}
