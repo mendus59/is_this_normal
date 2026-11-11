@@ -79,6 +79,11 @@ def text_of(r2, keys: list[str], max_chars: int) -> str:
     return "\n\n".join(out)
 
 
+# Cut long summaries in the database, not after the fact: the free Neon plan meters
+# network transfer, and full CRS summaries of every cited law used most of it.
+CITED_SUMMARY_CHARS = 4000
+
+
 def citations(conn, r2, item: Item, text: str | None = None) -> list[dict]:
     """What the item cites, most cited first, each with one context snippet. Only cited
     artifacts dated on or before the as-of date (or undated, like Code sections) are kept."""
@@ -103,9 +108,9 @@ def citations(conn, r2, item: Item, text: str | None = None) -> list[dict]:
     if not out:
         return []
     allowed = {r[0]: r[1:] for r in conn.execute(
-        "SELECT id, title, effective_date, official_summary, type FROM artifact WHERE id = ANY(%s)"
+        "SELECT id, title, effective_date, left(official_summary, %s), type FROM artifact WHERE id = ANY(%s)"
         " AND (effective_date IS NULL OR effective_date <= %s)",
-        ([c["to"] for c in out], item.as_of)).fetchall()}
+        (CITED_SUMMARY_CHARS, [c["to"] for c in out], item.as_of)).fetchall()}
     conn.commit()
     kept = []
     for c in out:
@@ -133,7 +138,7 @@ def analog_candidates(conn, item: Item, limit: int = 12) -> list[dict]:
             continue
         query = " | ".join(ws[:24])
         rows = conn.execute(
-            "SELECT id, type, title, effective_date, official_summary, metadata FROM artifact"
+            "SELECT id, type, title, effective_date, left(official_summary, 1500), metadata FROM artifact"
             f" WHERE type = %s AND in_scope AND id <> %s AND effective_date <= %s"
             f" AND to_tsvector('english', {fields}) @@ to_tsquery('english', %s)"
             f" ORDER BY ts_rank(to_tsvector('english', {fields}), to_tsquery('english', %s)) DESC,"
