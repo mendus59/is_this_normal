@@ -93,3 +93,17 @@ def test_whole_stage_is_sent_at_once_in_chunks(monkeypatch):
     jobs = [(f"eo/{n}", "2017-01-01", f"prompt {n}", {}) for n in range(llm.CHUNK + 50)]
     out = _pipe(monkeypatch, db, client, wait=5).call("type_assessment", jobs)
     assert [len(v) for v in client.sent.values()] == [llm.CHUNK, 50] and len(out) == llm.CHUNK + 50
+
+
+def test_dropped_connection_is_retried(monkeypatch):
+    import psycopg
+    calls = []
+
+    def fn(c, part):
+        calls.append(part)
+        if len(calls) == 1:
+            raise psycopg.OperationalError("SSL connection has been closed unexpectedly")
+    monkeypatch.setattr(stages.db, "connect", lambda: contextlib.nullcontext(None))
+    monkeypatch.setattr(stages.time, "sleep", lambda s: None)
+    stages._with_retry(fn, [1, 2])
+    assert calls == [[1, 2], [1, 2]]
