@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "export packets, or import answers"
+        description: "export packets, import answers, or rescore (re-apply fixed rules to stored scores)"
         type: choice
-        options: [export, import]
+        options: [export, import, rescore]
         default: export
       ids:
         description: "export: these artifact IDs instead of a selection (space separated)"
@@ -29,7 +29,7 @@ on:
         default: "100"
       batch:
         description: "batch name: export writes reviews/<batch>/packets.jsonl; import reads reviews/<batch>/"
-        required: true
+        required: false
 
 concurrency: analysis
 
@@ -82,3 +82,6 @@ jobs:
         run: |
           case "$BATCH" in *[!A-Za-z0-9_-]*|"") echo "batch must be letters, digits, - or _"; exit 1;; esac
           itn review import --packets "reviews/$BATCH/packets.jsonl" --answers reviews/$BATCH/answers*.jsonl
+      - name: Re-apply fixed rules to stored scores
+        if: inputs.action == 'rescore'
+        run: itn review rescore

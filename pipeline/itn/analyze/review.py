@@ -17,7 +17,7 @@ from psycopg.types.json import Jsonb
 
 from itn import db
 from itn.analyze import data, prompts
-from itn.analyze.stages import Pipeline, _hash, apply_rules, combine
+from itn.analyze.stages import Pipeline, _hash, apply_rules, cap_of, combine, merge
 
 REVIEW_SUFFIX = "-review"
 CHUNK = 25
@@ -151,3 +151,54 @@ def import_answers(rubric: dict, packets: list[Path], answers: list[Path], revie
         c.commit()
     log(f"Imported {written} reviewed scores")
     return written
+
+
+def rescore_rules(r2, rubric: dict, log=print) -> tuple[int, int]:
+    """Free: re-check stored economy scores whose precedent rating was set by the
+    express-overruling rule. The facts are rebuilt with the current rule; where it no longer
+    fires, the score is rebuilt from the model output already stored (and paid for), exactly
+    as the run combined it. Returns (rescored, still set by the rule)."""
+    rv = f"{rubric['version']}-economy"
+    with db.connect() as c:
+        rows = c.execute(
+            "SELECT s.artifact_id, s.analysis_id, an.kind FROM score s JOIN analysis an ON an.id = s.analysis_id"
+            " WHERE s.current AND an.rubric_version = %s"
+            " AND s.dimensions->'precedent'->>'rule' = 'express_overruling' ORDER BY s.artifact_id", (rv,)).fetchall()
+    log(f"{len(rows)} current scores have precedent set by the express-overruling rule")
+    pipe = Pipeline(r2, None, rubric, 0, "haiku", profile="economy", record_run=False)
+    changed = kept = 0
+    for start in range(0, len(rows), CHUNK):
+        part = rows[start:start + CHUNK]
+        with db.connect() as c:
+            items = {i.id: i for i in data.load_items(c, [r[0] for r in part])}
+        inp = pipe.economy_inputs(list(items.values()))
+        with db.connect() as c:
+            for artifact_id, analysis_id, kind in part:
+                item = items.get(artifact_id)
+                if item is None:
+                    continue
+                if inp["facts"][item.id].get("expressly_overrules"):
+                    kept += 1
+                    continue
+                allowed = set(inp["allowed"][item.id])
+                finals = data.same_actor_finals(c, item, sorted(allowed))
+                out = c.execute("SELECT output FROM analysis WHERE id = %s", (analysis_id,)).fetchone()[0]
+                dims, raw, conf = combine(rubric, item, out["dimensions"], allowed, finals)
+                if kind == "verification":
+                    first = c.execute(
+                        "SELECT output FROM analysis WHERE kind = 'type_assessment' AND subject_id = %s"
+                        " AND rubric_version = %s ORDER BY id DESC LIMIT 1", (item.id, rv)).fetchone()
+                    if first:
+                        d1, r1, c1 = combine(rubric, item, first[0]["dimensions"], allowed, finals)
+                        if r1 is not None:
+                            dims, raw, conf = merge(d1, dims, c1, cap_of(rubric))
+                if raw is None:
+                    continue
+                c.execute("UPDATE score SET dimensions = %s, raw = %s, confidence = %s"
+                          " WHERE artifact_id = %s AND analysis_id = %s",
+                          (Jsonb(dims), raw, conf, item.id, analysis_id))
+                changed += 1
+            c.commit()
+        log(f"  {min(start + CHUNK, len(rows))} of {len(rows)} checked")
+    log(f"Rescored {changed}; {kept} still expressly overrule")
+    return changed, kept
