@@ -248,6 +248,16 @@ def test_express_overrulings_skip_negations():
     assert got == ["Roe and Casey are overruled.", "Today we overrule Jones."]
 
 
+def test_questions_about_overruling_are_not_express():
+    from itn.analyze import data
+    assert data.express_overrulings("Accordingly, in granting certiorari, we directed the parties to address the "
+                                    "question whether Saucier should be overruled.") == []
+    assert data.express_overrulings("II Before considering whether Austin should be overruled, we first address "
+                                    "narrower grounds.") == []
+    assert data.express_overrulings("Jackson should be and now is overruled.") == ["Jackson should be and now is overruled."]
+    assert data.express_overrulings("Roe and Casey must be overruled.") == ["Roe and Casey must be overruled."]
+
+
 def test_statute_history_counts_other_presidents():
     from itn.analyze import data
 
