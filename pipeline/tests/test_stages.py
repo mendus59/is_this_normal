@@ -258,6 +258,23 @@ def test_questions_about_overruling_are_not_express():
     assert data.express_overrulings("Roe and Casey must be overruled.") == ["Roe and Casey must be overruled."]
 
 
+def test_conditions_history_and_quotes_are_not_express():
+    from itn.analyze import data
+    for s in ("And, until we overrule Zadvydas, it will continue to invite nothing but mischief.",
+              "The court found that no Supreme Court precedent is overruled or modified.",
+              "Should we overrule them all? Taking the argument seriously would require just that.",
+              "So if Almendarez-Torres is overruled, a defendant could be subject to all of that harm.",
+              "Before the claim reached this Court, the Collins case was overruled.",
+              "The second flaw in the dissent's proposed approach is its consequence: Gingles must be overruled.",
+              "It concluded: “This Court's opinion in Harper I is overruled.”"):
+        assert data.express_overrulings(s) == [], s
+    for s in ("Insofar as it held that a defective indictment deprives a court of jurisdiction, Bain is overruled.",
+              "To the extent that Meek and Wolman conflict with this holding, we overrule them.",
+              "If anything more is left of Humphrey's, we overrule it.",
+              "We hold that Roe and Casey must be overruled."):
+        assert data.express_overrulings(s) == [s], s
+
+
 def test_overruled_exceptions_are_not_precedent():
     from itn.analyze import data
     assert data.express_overrulings("For the reasons we discuss, Alaska's exceptions are overruled. "
