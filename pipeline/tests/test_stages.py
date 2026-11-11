@@ -258,6 +258,12 @@ def test_questions_about_overruling_are_not_express():
     assert data.express_overrulings("Roe and Casey must be overruled.") == ["Roe and Casey must be overruled."]
 
 
+def test_overruled_exceptions_are_not_precedent():
+    from itn.analyze import data
+    assert data.express_overrulings("For the reasons we discuss, Alaska's exceptions are overruled. "
+                                    "We overrule Alaska's exception.") == []
+
+
 def test_statute_history_counts_other_presidents():
     from itn.analyze import data
 
