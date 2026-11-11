@@ -11,6 +11,8 @@ Stages, each sent as one batch across all items:
 
 import hashlib
 import json
+import os
+import time
 from math import floor
 
 from psycopg.types.json import Jsonb
@@ -19,6 +21,7 @@ from itn import db
 from itn.analyze import data, prompts
 from itn.analyze.actors import final_rating
 from itn.analyze.estimate import EFFORT
+from itn.analyze import llm
 from itn.analyze.llm import BudgetExceeded, Req, Spend, run as run_requests, tier_of
 
 MAX_DIGESTS_PER_ITEM = 15
@@ -31,6 +34,12 @@ DISAGREEMENT_CONFIDENCE = 0.7
 # Small stages skip the Batch API: its queue can take hours, which costs more in waiting
 # than the discount saves on a few dozen calls.
 BATCH_MIN = 100
+# GitHub stops the Analyze job at 360 minutes; stop waiting on batches before that.
+WAIT_MINUTES = float(os.environ.get("ITN_WAIT_MINUTES", "320"))
+
+
+class BatchesPending(RuntimeError):
+    pass
 
 
 def _hash(*parts) -> str:
@@ -61,6 +70,8 @@ class Pipeline:
         run_cfg = rubric.get("run", {})
         self.batch, self.caching = bool(run_cfg.get("batch")), bool(run_cfg.get("prompt_caching"))
         self.spend = Spend(budget)
+        self.reserved, self._rough = 0.0, {}
+        self.deadline = time.monotonic() + WAIT_MINUTES * 60
         self.run_id = None
         if not record_run:     # free uses (review packets) call no model and log no run
             return
@@ -87,35 +98,91 @@ class Pipeline:
                     (stage, list(by_hash))).fetchall():
                 out[by_hash[h]] = (output, aid)
         todo = [s for s in keyed if s not in out]
-        if todo:
-            self.log(f"{stage}: {len(todo)} calls on {tier} ({len(out)} cached)")
+        if not todo:
+            return out
+        open_batches = self._open_batches(stage) if self.batch else {}
+        inflight = {v["hash"] for m in open_batches.values() for v in m.values()}
+        remaining = [s for s in todo if keyed[s][3] not in inflight]
+        self.log(f"{stage}: {len(remaining)} calls on {tier} ({len(out)} cached,"
+                 f" {len(todo) - len(remaining)} already sent in earlier batches)")
+        if remaining and not (self.batch and len(remaining) >= BATCH_MIN):
             reqs = [Req(f"{stage[:8]}-{i}", stage, tier, system, keyed[s][1], keyed[s][2], self.effort.get(stage))
-                    for i, s in enumerate(todo)]
-            subject = {r.custom_id: s for r, s in zip(reqs, todo)}
-            results = run_requests(self.client, reqs, self.models, self.spend,
-                                   self.batch and len(reqs) >= BATCH_MIN, self.caching)
+                    for i, s in enumerate(remaining)]
+            subject = {r.custom_id: s for r, s in zip(reqs, remaining)}
+            results = run_requests(self.client, reqs, self.models, self.spend, False, self.caching)
             with db.connect() as c:
                 for cid, res in results.items():
-                    s = subject[cid]
-                    if res.data is None:
-                        self.log(f"  {stage} {s}: {res.error}")
-                        out[s] = (None, None)
-                        continue
-                    row = c.execute(
-                        "INSERT INTO analysis (kind, subject_id, as_of, input_hash, rubric_version, model, output,"
-                        " cost_usd, run_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
-                        " ON CONFLICT (kind, input_hash) DO UPDATE SET output = EXCLUDED.output RETURNING id",
-                        (stage, s, keyed[s][0], keyed[s][3], self.rv, res.model, Jsonb(res.data),
-                         round(res.cost_usd, 4), self.run_id)).fetchone()
-                    out[s] = (res.data, row[0])
+                    out[subject[cid]] = self._store(c, stage, subject[cid], keyed[subject[cid]][0],
+                                                    keyed[subject[cid]][3], res)
                 self._save_run(c, "running")
+            remaining = []
+        for k in range(0, len(remaining), llm.CHUNK):
+            chunk = remaining[k:k + llm.CHUNK]
+            reqs = [Req(f"r{n}", stage, tier, system, keyed[s][1], keyed[s][2], self.effort.get(stage))
+                    for n, s in enumerate(chunk)]
+            rough = sum(llm.rough_cost(r, True) for r in reqs)
+            self.spend.check(self.reserved + rough)
+            bid = llm.submit_batch(self.client, reqs, self.models, self.caching)
+            mapping = {r.custom_id: {"subject": s, "as_of": str(keyed[s][0]), "hash": keyed[s][3], "tier": tier}
+                       for r, s in zip(reqs, chunk)}
+            with db.connect() as c:
+                c.execute("INSERT INTO model_batch (id, stage, run_id, requests) VALUES (%s, %s, %s, %s)",
+                          (bid, stage, self.run_id, Jsonb(mapping)))
+                c.commit()
+            open_batches[bid] = mapping
+            self.reserved += rough
+            self._rough[bid] = rough
+        if open_batches:
+            self._collect(stage, open_batches, {keyed[s][3]: s for s in todo}, out)
         return out
 
-    def _save_run(self, c, status: str) -> None:
-        t = self.spend.tokens
-        c.execute("UPDATE run SET input_tokens = %s, cached_tokens = %s, output_tokens = %s, cost_usd = %s,"
-                  " status = %s, finished_at = CASE WHEN %s <> 'running' THEN now() END WHERE id = %s",
-                  (t["input"], t["cached"], t["output"], round(self.spend.spent, 4), status, status, self.run_id))
+    def _open_batches(self, stage: str) -> dict[str, dict]:
+        with db.connect() as c:
+            return {bid: m for bid, m in c.execute(
+                "SELECT id, requests FROM model_batch WHERE stage = %s AND status = 'submitted'"
+                " AND created_at > now() - interval '28 days'", (stage,)).fetchall()}
+
+    def _collect(self, stage: str, batches: dict[str, dict], wanted: dict[str, str], out: dict) -> None:
+        """Wait for batches and store every result, including ones sent by earlier runs.
+        At the deadline, stop cleanly: the next run collects what is still queued."""
+        self.log(f"  waiting on {len(batches)} batches: {', '.join(sorted(batches))}")
+        pending = set(batches)
+        while pending:
+            for bid in sorted(pending):
+                if not llm.batch_ended(self.client, bid):
+                    continue
+                mapping = batches[bid]
+                results = llm.collect_batch(self.client, bid, {cid: v["tier"] for cid, v in mapping.items()},
+                                            self.models, self.spend)
+                with db.connect() as c:
+                    for cid, res in results.items():
+                        v = mapping[cid]
+                        got = self._store(c, stage, v["subject"], v["as_of"], v["hash"], res)
+                        if v["hash"] in wanted:
+                            out[wanted[v["hash"]]] = got
+                    c.execute("UPDATE model_batch SET status = 'collected', collected_at = now() WHERE id = %s", (bid,))
+                    self._save_run(c, "running")
+                    c.commit()
+                self.reserved -= self._rough.pop(bid, 0.0)
+                pending.discard(bid)
+                self.log(f"  collected {bid} ({len(results)} results), ${self.spend.spent:.2f} spent")
+            if pending:
+                if time.monotonic() > self.deadline:
+                    raise BatchesPending(f"{len(pending)} {stage} batches still in Anthropic's queue;"
+                                         " the next run collects them without paying again")
+                time.sleep(llm.POLL_SECONDS)
+
+    def _store(self, c, stage: str, subject: str, as_of, input_hash: str, res) -> tuple[dict | None, int | None]:
+        if res.data is None:
+            self.log(f"  {stage} {subject}: {res.error}")
+            return None, None
+        row = c.execute(
+            "INSERT INTO analysis (kind, subject_id, as_of, input_hash, rubric_version, model, output,"
+            " cost_usd, run_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            " ON CONFLICT (kind, input_hash) DO UPDATE SET output = EXCLUDED.output RETURNING id",
+            (stage, subject, as_of, input_hash, self.rv, res.model, Jsonb(res.data),
+             round(res.cost_usd, 4), self.run_id)).fetchone()
+        return res.data, row[0]
 
     # ---- the pipeline -------------------------------------------------------------
 
@@ -126,6 +193,9 @@ class Pipeline:
         except BudgetExceeded as e:
             self.log(str(e))
             status = "stopped_budget"
+        except BatchesPending as e:
+            self.log(str(e))
+            status = "waiting_on_batches"
         with db.connect() as c:
             self._save_run(c, status)
         self.log(f"Run {self.run_id} {status}: ${self.spend.spent:.2f} of ${self.spend.budget:.2f}")

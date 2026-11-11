@@ -8,10 +8,15 @@ from dataclasses import dataclass
 from itn.analyze.estimate import BATCH, CACHE_READ, CHARS_PER_TOKEN, EFFORT, HAIKU_LONG, HAIKU_LONG_FROM, PRICES
 
 CACHE_WRITE = 1.25
-CHUNK = 200                 # requests per batch; the budget is checked between chunks
+CHUNK = 200                 # requests per batch; the budget is checked before each one is sent
 POLL_SECONDS = 30
 MAX_TOKENS = {"summary": 4_000, "authority_digest": 4_000, "citation_check": 2_000,
               "type_assessment": 16_000, "verification": 16_000}
+# Upper-end output guesses for reserving budget before batches are sent. Observed economy
+# outputs are about 1,200 tokens for assessments; half of MAX_TOKENS was far too high to
+# send a whole stage at once.
+EXPECTED_OUT = {"summary": 1_500, "authority_digest": 1_500, "citation_check": 600,
+                "type_assessment": 2_500, "verification": 2_500}
 
 
 class BudgetExceeded(RuntimeError):
@@ -58,7 +63,7 @@ def usage_cost(tier: str, usage: dict, batch: bool) -> float:
 def rough_cost(req: Req, batch: bool) -> float:
     """Upper-end guess for one request, used to stop before the budget is crossed."""
     tokens_in = (len(req.system) + len(req.user)) // CHARS_PER_TOKEN
-    return usage_cost(req.tier, {"input_tokens": tokens_in, "output_tokens": MAX_TOKENS[req.stage] // 2}, batch)
+    return usage_cost(req.tier, {"input_tokens": tokens_in, "output_tokens": EXPECTED_OUT[req.stage]}, batch)
 
 
 class Spend:
@@ -134,4 +139,38 @@ def run(client, reqs: list[Req], models: dict, spend: Spend, batch: bool, cachin
             cost = usage_cost(r.tier, usage, False)
             spend.add(cost, usage)
             out[r.custom_id] = Result(data, err, cost, models[r.tier], usage)
+    return out
+
+
+# ---- batches that outlive a run ---------------------------------------------------
+# A batch can sit in Anthropic's queue for hours. Callers record each batch when it is
+# sent and collect it whenever it ends, in this run or a later one, so a job timeout
+# never throws away results that were paid for.
+
+def submit_batch(client, reqs: list[Req], models: dict, caching: bool) -> str:
+    b = client.messages.batches.create(requests=[
+        {"custom_id": r.custom_id, "params": _params(r, models, caching)} for r in reqs])
+    return b.id
+
+
+def batch_ended(client, batch_id: str) -> bool:
+    return client.messages.batches.retrieve(batch_id).processing_status == "ended"
+
+
+def collect_batch(client, batch_id: str, tiers: dict[str, str], models: dict, spend: Spend) -> dict[str, Result]:
+    """Results of an ended batch by custom_id; `tiers` maps custom_id to the tier it used."""
+    out: dict[str, Result] = {}
+    for res in client.messages.batches.results(batch_id):
+        tier = tiers.get(res.custom_id)
+        if tier is None:
+            continue
+        if res.result.type == "succeeded":
+            msg = res.result.message
+            usage = _usage(msg)
+            data, err = _parse(msg)
+        else:
+            usage, data, err = {}, None, res.result.type
+        cost = usage_cost(tier, usage, True)
+        spend.add(cost, usage)
+        out[res.custom_id] = Result(data, err, cost, models[tier], usage)
     return out
