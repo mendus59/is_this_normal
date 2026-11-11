@@ -174,6 +174,9 @@ _EXPRESS = re.compile(
 _NEGATED = re.compile(r"\b(?:not|decline[sd]?|need not|should not|would not|cannot|no reason to|unnecessary to"
                       r"|whether|would|argu(?:e[sd]?|ing)|urg(?:e[sd]?|ing)|contend(?:s|ed)?|ask(?:s|ed)?)\b"
                       r"[^.]{0,60}$", re.IGNORECASE)
+# Overruling a party's exception, objection or motion is a ruling in the case, not on precedent
+# ("Alaska's exceptions are overruled" in an original-jurisdiction case).
+_NOT_PRECEDENT = re.compile(r"\b(?:exceptions?|objections?|demurrers?|motions?)\b", re.IGNORECASE)
 
 # Statutes that give the President emergency or extraordinary powers. Invoking one is a
 # fact the procedure dimension weighs; it is not by itself a departure.
@@ -195,7 +198,7 @@ def express_overrulings(text: str) -> list[str]:
     for m in _OVERRULE.finditer(text or ""):
         sentence = " ".join(m.group(0).split())
         e = _EXPRESS.search(sentence)
-        if e and not _NEGATED.search(sentence[:e.start()]):
+        if e and not _NEGATED.search(sentence[:e.start()]) and not _NOT_PRECEDENT.search(sentence):
             out.append(sentence)
     return list(dict.fromkeys(out))
 
