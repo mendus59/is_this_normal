@@ -42,6 +42,23 @@ class BatchesPending(RuntimeError):
     pass
 
 
+INPUT_SLICE = 100
+
+
+def _with_retry(fn, part, tries: int = 3):
+    """Run fn(conn, part) on a fresh connection, retrying when the server drops it."""
+    import psycopg
+    for attempt in range(tries):
+        try:
+            with db.connect() as c:
+                fn(c, part)
+            return
+        except psycopg.OperationalError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(5 * (attempt + 1))
+
+
 def _hash(*parts) -> str:
     return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -304,13 +321,25 @@ class Pipeline:
         texts = {i.id: data.text_of(self.r2, i.text_keys, e["item_chars"]) for i in items}
         # Rulings: scan the whole controlling opinion (free) for overruling language.
         full = {i.id: data.text_of(self.r2, i.text_keys, data.TEXT_MAX_CHARS) for i in items if i.type == "scotus_case"}
-        with db.connect() as c:
-            cites = {i.id: data.citations(c, self.r2, i, texts[i.id]) for i in items}
-            candidates = {i.id: [{**cd, "summary": cd["summary"][:e["analog_chars"]]}
-                                 for cd in data.analog_candidates(c, i, e["analogs"])] for i in items}
-            facts = {i.id: data.record_facts(c, i, full.get(i.id), [ct["to"] for ct in cites[i.id]]) for i in items}
-            wanted = {ct["to"] for i in items for ct in cites[i.id][:e["max_cited"]] if not ct["summary"]}
-            keys = {a: data._text_keys(c, a) for a in wanted}
+        cites, candidates, facts = {}, {}, {}
+
+        def gather(c, part):
+            for i in part:
+                cites[i.id] = data.citations(c, self.r2, i, texts[i.id])
+                candidates[i.id] = [{**cd, "summary": cd["summary"][:e["analog_chars"]]}
+                                    for cd in data.analog_candidates(c, i, e["analogs"])]
+                facts[i.id] = data.record_facts(c, i, full.get(i.id), [ct["to"] for ct in cites[i.id]])
+
+        # A fresh connection per slice: one connection held through thousands of queries
+        # was dropped by the server an hour into the first full run.
+        for k in range(0, len(items), INPUT_SLICE):
+            _with_retry(gather, items[k:k + INPUT_SLICE])
+        wanted = {ct["to"] for i in items for ct in cites[i.id][:e["max_cited"]] if not ct["summary"]}
+        keys = {}
+        wanted_list = sorted(wanted)
+        for k in range(0, len(wanted_list), INPUT_SLICE * 5):
+            _with_retry(lambda c, part: keys.update({a: data._text_keys(c, a) for a in part}),
+                        wanted_list[k:k + INPUT_SLICE * 5])
         free = {a: data.text_of(self.r2, k, e["cited_chars"]) for a, k in keys.items() if k}
 
         def material(ct):
