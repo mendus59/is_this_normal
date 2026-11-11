@@ -201,6 +201,14 @@ class Pipeline:
              round(res.cost_usd, 4), self.run_id)).fetchone()
         return res.data, row[0]
 
+    def _save_run(self, c, status: str) -> None:
+        if self.run_id is None:
+            return
+        t = self.spend.tokens
+        c.execute("UPDATE run SET input_tokens = %s, cached_tokens = %s, output_tokens = %s, cost_usd = %s,"
+                  " status = %s, finished_at = CASE WHEN %s <> 'running' THEN now() END WHERE id = %s",
+                  (t["input"], t["cached"], t["output"], round(self.spend.spent, 4), status, status, self.run_id))
+
     # ---- the pipeline -------------------------------------------------------------
 
     def score(self, ids: list[str]) -> None:

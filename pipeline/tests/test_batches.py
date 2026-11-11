@@ -28,6 +28,8 @@ class DB:
             rows = [(b, v["requests"]) for b, v in self.batches.items() if v["status"] == "submitted"]
         elif q.startswith("INSERT INTO model_batch"):
             self.batches[p[0]] = {"requests": p[3].obj, "status": "submitted"}
+        elif q.startswith("UPDATE run"):
+            self.run_updates = getattr(self, "run_updates", 0) + 1
         elif q.startswith("UPDATE model_batch"):
             self.batches[p[0]]["status"] = "collected"
         return NS(fetchall=lambda: rows, fetchone=lambda: None)
@@ -65,7 +67,7 @@ def _pipe(monkeypatch, db, client, wait):
     monkeypatch.setattr(stages.time, "sleep", lambda s: None)
     monkeypatch.setattr(stages, "WAIT_MINUTES", wait)
     p = stages.Pipeline(None, client, RUBRIC, 10, "haiku", profile="economy", record_run=False)
-    p._save_run = lambda c, status: None
+    p.run_id = 1     # exercise the real run bookkeeping, which the first full run crashed on
     return p
 
 
