@@ -73,6 +73,9 @@ jobs:
           cache: pip
           cache-dependency-path: pipeline/pyproject.toml
       - run: pip install ./pipeline
+      - name: Apply database migrations
+        if: ${{ !inputs.dry_run }}
+        run: itn migrate
       - name: Run analysis
         run: |
           args=(--budget "${{ inputs.budget }}" --max-tier "${{ inputs.max_tier }}")
