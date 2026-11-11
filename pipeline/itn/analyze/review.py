@@ -70,12 +70,16 @@ def export(r2, rubric: dict, ids: list[str], out: Path, log=print) -> int:
     return n
 
 
-def _facts(facts: dict) -> dict:
+def _facts(facts: dict, answer: dict | None = None) -> dict:
     """Packet facts, with the express-overruling sentences re-checked by the current rule so
-    a packet exported before a rule fix does not carry a false positive into the score."""
+    a packet exported before a rule fix does not carry a false positive into the score. The
+    reviewer read those sentences: a reviewed precedent rating above 0 means the reviewer
+    judged that none of them is the Court overruling a precedent, and that judgment stands."""
     express = facts.get("expressly_overrules")
     if isinstance(express, list):
         kept = [s for s in express if data.express_overrulings(s)]
+        if (((answer or {}).get("precedent") or {}).get("rating") or 0) > 0:
+            kept = []
         return {**facts, "expressly_overrules": kept or False}
     return facts
 
@@ -133,7 +137,7 @@ def import_answers(rubric: dict, packets: list[Path], answers: list[Path], revie
                 if raw is None:
                     log(f"  skip {where}: no rating had evidence")
                     continue
-                dims, raw, conf = apply_rules(rubric, item, dims, raw, conf, _facts(pk["facts"]))
+                dims, raw, conf = apply_rules(rubric, item, dims, raw, conf, _facts(pk["facts"], ans["dimensions"]))
                 output = {"dimensions": ans["dimensions"], "note": ans.get("note", ""),
                           "reviewed": dt.date.today().isoformat()}
                 aid = c.execute(
