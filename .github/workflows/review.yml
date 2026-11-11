@@ -33,6 +33,11 @@ on:
 
 concurrency: analysis
 
+# Export pushes packets to the branch review/<batch>. Answers are committed there too, and
+# import is dispatched from that branch, so packets never land on main.
+permissions:
+  contents: write
+
 jobs:
   review:
     runs-on: ubuntu-latest
@@ -63,11 +68,15 @@ jobs:
           [ -n "$IDS" ] && args+=(--ids $IDS)
           [ -n "$TYPE" ] && args+=(--type "$TYPE")
           itn review export "${args[@]}"
-      - uses: actions/upload-artifact@v4
+      - name: Push packets to branch review/<batch>
         if: inputs.action == 'export'
-        with:
-          name: review-${{ inputs.batch }}
-          path: reviews/${{ inputs.batch }}/packets.jsonl
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "review/$BATCH"
+          git add "reviews/$BATCH/packets.jsonl"
+          git commit -m "Review packets: $BATCH"
+          git push -f origin "review/$BATCH"
       - name: Import answers
         if: inputs.action == 'import'
         run: |
