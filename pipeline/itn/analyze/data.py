@@ -167,9 +167,12 @@ _OVERRULE = re.compile(r"[^.]{0,200}\b(?:overrul(?:e|ed|es|ing)|abrogat(?:e|ed|e
 # An express, affirmative overruling ("Roe and Casey are overruled", "we overrule"), not
 # "we decline to overrule" or a plurality that "would overrule".
 _EXPRESS = re.compile(
-    r"\b(?:is|are|be|were|was|stands?)\s+(?:hereby\s+|now\s+|accordingly\s+|therefore\s+|thus\s+)?overruled\b"
+    r"\b(?:is|are|were|was|stands?|must\s+be)\s+(?:hereby\s+|now\s+|accordingly\s+|therefore\s+|thus\s+)?overruled\b"
     r"|\bwe\s+(?:now\s+|therefore\s+|today\s+|hereby\s+)?overrule\b", re.IGNORECASE)
-_NEGATED = re.compile(r"\b(?:not|decline[sd]?|need not|should not|would not|cannot|no reason to|unnecessary to)\b"
+# Also not a question or an argument about overruling ("whether Saucier should be overruled",
+# "petitioner argues Austin was wrongly decided and is overruled by...").
+_NEGATED = re.compile(r"\b(?:not|decline[sd]?|need not|should not|would not|cannot|no reason to|unnecessary to"
+                      r"|whether|would|argu(?:e[sd]?|ing)|urg(?:e[sd]?|ing)|contend(?:s|ed)?|ask(?:s|ed)?)\b"
                       r"[^.]{0,60}$", re.IGNORECASE)
 
 # Statutes that give the President emergency or extraordinary powers. Invoking one is a
