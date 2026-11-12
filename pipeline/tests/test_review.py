@@ -87,7 +87,7 @@ def test_rescore_rebuilds_score_when_rule_no_longer_fires(monkeypatch):
 
     class C(Conn):
         def execute(self, q, p=()):
-            if q.startswith("SELECT s.artifact_id"):
+            if q.startswith("SELECT s.artifact_id, s.analysis_id, an.kind"):
                 return NS(fetchall=lambda: [(case.id, 5, "type_assessment"), ("scotus/1-us-1", 6, "type_assessment")])
             if q.startswith("SELECT output FROM analysis WHERE id"):
                 return NS(fetchone=lambda: (out,))
@@ -108,3 +108,31 @@ def test_rescore_rebuilds_score_when_rule_no_longer_fires(monkeypatch):
     dims, raw, conf, artifact, analysis_id = updates[0]
     assert artifact == case.id and analysis_id == 5 and raw == 0.75
     assert "rule" not in dims.obj["precedent"]
+
+
+def test_rescore_applies_rule_to_rulings_it_used_to_miss(monkeypatch):
+    sdims = RUBRIC["types"]["scotus_case"]["dimensions"]
+    stored = {k: {"rating": 3, "rating_independent": 3, "final": 3, "evidence": ["x"], "reason": "r"} for k in sdims}
+    hit = Item(id="scotus/585-us-162", type="scotus_case", subtype=None, title="Wayfair",
+               effective_date=dt.date(2018, 6, 21), summary="", metadata={})
+    miss = Item(id="scotus/1-us-1", type="scotus_case", subtype=None, title="X", effective_date=dt.date(2018, 6, 21),
+                summary="", metadata={})
+    hit.text_keys, miss.text_keys = ["hit"], ["miss"]
+    updates = []
+
+    class C(Conn):
+        def execute(self, q, p=()):
+            if q.startswith("SELECT s.artifact_id, s.analysis_id, s.dimensions"):
+                return NS(fetchall=lambda: [(hit.id, 5, dict(stored), 0.75, 1.0), (miss.id, 6, dict(stored), 0.75, 1.0)])
+            if q.startswith("UPDATE score"):
+                updates.append(p)
+            return NS(fetchone=lambda: None, fetchall=lambda: [])
+
+    monkeypatch.setattr(review.db, "connect", lambda: contextlib.nullcontext(C()))
+    monkeypatch.setattr(data, "load_items", lambda c, ids: [hit, miss])
+    monkeypatch.setattr(data, "text_of", lambda r2, keys, n: (
+        "Quill and Bellas Hess should be, and now are, overruled." if keys == ["hit"] else "We decline to overrule Smith."))
+    assert review.apply_new_overrulings(None, RUBRIC, log=lambda m: None) == 1
+    dims, raw, conf, artifact, analysis_id = updates[0]
+    assert artifact == hit.id and analysis_id == 5 and raw < 0.75
+    assert dims.obj["precedent"]["rule"] == "express_overruling" and dims.obj["precedent"]["final"] == 0

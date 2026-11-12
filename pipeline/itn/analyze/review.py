@@ -229,4 +229,50 @@ def rescore_rules(r2, rubric: dict, log=print) -> tuple[int, int]:
             c.commit()
         log(f"  {min(start + CHUNK, len(rows))} of {len(rows)} checked")
     log(f"Rescored {changed}; {kept} still expressly overrule")
+    added = apply_new_overrulings(r2, rubric, log)
+    log(f"{added} more rulings now set by the express-overruling rule")
     return changed, kept
+
+
+def apply_new_overrulings(r2, rubric: dict, log=print) -> int:
+    """Free: the other direction of a rule fix. Scan every unreviewed economy score of a ruling
+    that the rule did not set, and where the current rule finds an express overruling in the
+    stored opinion text, apply it to the stored dimensions. Reviewed scores are left alone:
+    the reviewer read the passages and that judgment stands."""
+    rating = (rubric.get("rules") or {}).get("express_overruling_precedent")
+    if rating is None:
+        return 0
+    rv = f"{rubric['version']}-economy"
+    with db.connect() as c:
+        rows = c.execute(
+            "SELECT s.artifact_id, s.analysis_id, s.dimensions, s.raw, s.confidence FROM score s"
+            " JOIN analysis an ON an.id = s.analysis_id JOIN artifact a ON a.id = s.artifact_id"
+            " WHERE s.current AND an.rubric_version = %s AND a.type = 'scotus_case'"
+            " AND s.dimensions->'precedent'->>'rule' IS NULL ORDER BY s.artifact_id", (rv,)).fetchall()
+    log(f"{len(rows)} unreviewed rulings checked for express overrulings the rule missed")
+    added = 0
+    for start in range(0, len(rows), CHUNK):
+        part = rows[start:start + CHUNK]
+        with db.connect() as c:
+            items = {i.id: i for i in data.load_items(c, [r[0] for r in part])}
+        hits = []
+        for artifact_id, analysis_id, dims, raw, conf in part:
+            item = items.get(artifact_id)
+            if item is None or "precedent" not in dims:
+                continue
+            express = data.express_overrulings(data.text_of(r2, item.text_keys, data.TEXT_MAX_CHARS))[:3]
+            if not express:
+                continue
+            before = dims["precedent"].get("final")
+            dims, raw, conf = apply_rules(rubric, item, dims, raw, conf, {"expressly_overrules": express})
+            if dims["precedent"].get("rule"):
+                log(f"  {item.id}: precedent {before} -> {rating}: {express[0][:160]}")
+                hits.append((Jsonb(dims), raw, conf, item.id, analysis_id))
+        if hits:
+            with db.connect() as c:
+                for h in hits:
+                    c.execute("UPDATE score SET dimensions = %s, raw = %s, confidence = %s"
+                              " WHERE artifact_id = %s AND analysis_id = %s", h)
+                c.commit()
+            added += len(hits)
+    return added

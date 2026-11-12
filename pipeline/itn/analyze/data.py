@@ -165,10 +165,12 @@ _OVERRULE = re.compile(r"[^.]{0,200}\b(?:overrul(?:e|ed|es|ing)|abrogat(?:e|ed|e
 
 
 # An express, affirmative overruling ("Roe and Casey are overruled", "we overrule"), not
-# "we decline to overrule" or a plurality that "would overrule".
+# "we decline to overrule" or a plurality that "would overrule". Adverbs and commas may sit
+# between the words ("we consequently overrule", "should be, and now are, overruled").
+_ADV = r"(?:hereby|now|accordingly|therefore|thus|consequently|today|also|expressly|explicitly)"
 _EXPRESS = re.compile(
-    r"\b(?:is|are|stands?|must\s+be)\s+(?:hereby\s+|now\s+|accordingly\s+|therefore\s+|thus\s+)?overruled\b"
-    r"|\bwe\s+(?:now\s+|therefore\s+|today\s+|hereby\s+)?overrule\b", re.IGNORECASE)
+    rf"\b(?:is|are|stands?|must\s+be),?\s+(?:{_ADV},?\s+)?overruled\b"
+    rf"|\bwe,?\s+(?:{_ADV},?\s+){{0,2}}overrule\b", re.IGNORECASE)
 # Also not a question, a condition or an argument about overruling ("whether Saucier should be
 # overruled", "until we overrule Zadvydas", "no precedent is overruled"). Past-tense "was
 # overruled" is left out above because it recounts an earlier decision's fate.
@@ -180,8 +182,8 @@ _NEGATED = re.compile(r"\b(?:not|no|decline[sd]?|need not|should not|would not|c
 # is overruled: "we overrule Harris Truck Lines ... to the extent they purport to authorize an
 # exception" still counts. A sentence about what the dissent's approach would require, a
 # question, or a quotation of another court is not the Court overruling either.
-_NOT_PRECEDENT = re.compile(r"\b(?:exceptions?|objections?|demurrers?|motions?)\b[^.]{0,120}\b(?:is|are)\s+"
-                            r"(?:hereby\s+|now\s+|accordingly\s+|therefore\s+|thus\s+)?overruled\b"
+_NOT_PRECEDENT = re.compile(r"\b(?:exceptions?|objections?|demurrers?|motions?)\b[^.]{0,120}\b(?:is|are),?\s+"
+                            rf"(?:{_ADV},?\s+)?overruled\b"
                             r"|\boverrule\b[^.]{0,40}\b(?:exceptions?|objections?|demurrers?|motions?)\b"
                             r"|\bdissent(?:'s|s|ing)?\b|overrule[^.]{0,60}\?|[“\"][^”\"]{0,200}\boverruled?\b",
                             re.IGNORECASE)
