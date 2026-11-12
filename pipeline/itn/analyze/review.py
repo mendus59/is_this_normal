@@ -39,6 +39,34 @@ def select(conn, max_raw: float, min_confidence: float, types: list[str] | None,
     return [r[0] for r in rows]
 
 
+def backlog(conn, reviewer: str) -> list[tuple]:
+    """How many current economy scores this reviewer has not settled, by type and band of
+    the raw score (below 0.2, 0.4, 0.6, 0.8, and the rest); pre-sorted routine items apart."""
+    return conn.execute(
+        "SELECT a.type, an.model = 'rule' AS presorted, least(floor(s.raw * 5)::int, 4) AS band, count(*)"
+        " FROM score s JOIN analysis an ON an.id = s.analysis_id JOIN artifact a ON a.id = s.artifact_id"
+        " WHERE s.current AND an.rubric_version LIKE %s"
+        " AND NOT EXISTS (SELECT 1 FROM analysis r WHERE r.subject_id = s.artifact_id"
+        "                 AND r.rubric_version LIKE %s AND r.model = %s)"
+        " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3", ("%-economy", f"%{REVIEW_SUFFIX}", reviewer)).fetchall()
+
+
+def sample(conn, per_type: int, seed: str, reviewer: str) -> list[str]:
+    """A spot check: a repeatable random draw of current economy scores of every kind (model
+    rated or pre-sorted routine, any score), the same number per type, skipping items this
+    reviewer already settled. The order depends only on the seed and the item id."""
+    rows = conn.execute(
+        "SELECT artifact_id FROM (SELECT s.artifact_id, row_number() OVER (PARTITION BY a.type"
+        "   ORDER BY md5(%s || s.artifact_id)) AS n"
+        " FROM score s JOIN analysis an ON an.id = s.analysis_id JOIN artifact a ON a.id = s.artifact_id"
+        " WHERE s.current AND an.rubric_version LIKE %s"
+        " AND NOT EXISTS (SELECT 1 FROM analysis r WHERE r.subject_id = s.artifact_id"
+        "                 AND r.rubric_version LIKE %s AND r.model = %s)) t"
+        " WHERE n <= %s ORDER BY artifact_id",
+        (seed, "%-economy", f"%{REVIEW_SUFFIX}", reviewer, per_type)).fetchall()
+    return [r[0] for r in rows]
+
+
 def _first(dims: dict) -> dict:
     return {"dimensions": {k: {x: d.get(x) for x in ("rating", "rating_independent", "evidence", "reason")}
                            for k, d in dims.items()}}
