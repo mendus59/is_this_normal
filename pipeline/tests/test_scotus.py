@@ -284,3 +284,31 @@ def test_retitle_prefers_listed_names(monkeypatch):
     assert conn.updates == [("Ramos v. Louisiana", "scotus/590-us-83"), ("Barr v. Lee", "scotus/591-us-979")]
     assert tried == {r[0] for r in rows}
     assert scotus_repair.retitle(conn, None, None, tried, log=lambda m: None) == 0   # not retried every day
+
+
+def test_known_names_need_the_party_in_the_text(monkeypatch):
+    import datetime as dt
+    from itn.ingest import scotus_repair
+
+    rows = [("scotus/589-us-345", "No. 19-5421", dt.date(2020, 3, 23), "19-5421", "on petition for writ of certiorari", "k1"),
+            ("scotus/590-us-806", "No. 18-9674", dt.date(2020, 6, 15), "18-9674", "on petition for writ of certiorari", "k2")]
+
+    class Conn:
+        updates = []
+
+        def execute(self, q, p=()):
+            if q.startswith("SELECT"):
+                return type("R", (), {"fetchall": lambda s: rows})()
+            self.updates.append(p)
+
+        def commit(self):
+            pass
+
+    class R2:
+        def get_text(self, key):
+            return {"k1": "After his encounter with police, Charles Davis entered a guilty plea", "k2": "someone else"}[key]
+
+    monkeypatch.setattr(scotus_repair, "listed_names", lambda client, terms, log: {})
+    tried = {r[0] for r in rows}                       # already tried once: known dockets are still retried
+    assert scotus_repair.retitle(Conn(), R2(), None, tried, log=lambda m: None) == 1
+    assert Conn.updates == [("Davis v. United States", "scotus/589-us-345")]
