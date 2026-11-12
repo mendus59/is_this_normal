@@ -9,7 +9,7 @@ on:
       action:
         description: "export packets, import answers, or rescore (re-apply fixed rules to stored scores; the dry run only lists the changes)"
         type: choice
-        options: [export, import, rescore, rescore-dry-run]
+        options: [export, import, rescore, rescore-dry-run, agreement]
         default: export
       ids:
         description: "export: these artifact IDs instead of a selection (space separated)"
@@ -98,3 +98,6 @@ jobs:
       - name: List what re-applying the fixed rules would change
         if: inputs.action == 'rescore-dry-run'
         run: itn review rescore --dry-run
+      - name: Compare a trial run with the reviewed ratings
+        if: inputs.action == 'agreement'
+        run: itn review agreement

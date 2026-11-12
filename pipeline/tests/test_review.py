@@ -167,3 +167,12 @@ def test_rescore_dry_run_writes_nothing(monkeypatch):
 def test_import_ignores_the_ruling_path_fact():
     facts = review._facts({"ruling_path": {"kind": "summary_disposition", "description": "d"}, "expressly_overrules": False})
     assert "ruling_path" not in facts
+
+
+def test_agreement_tally_counts_before_and_after():
+    r = lambda n: {"rating": n}
+    rows = [("scotus_case", {"reach": r(3), "text": r(-1)}, {"reach": r(3), "text": r(3)}, {"reach": r(2)}),
+            ("scotus_case", {"reach": r(3)}, {"reach": r(1)}, None)]
+    lines = review.tally_agreement(rows)
+    assert lines[0] == "  scotus_case reach: before 0/1 exact, 1 within one, mean -1.00; after 1/2 exact, 1 within one, mean -1.00"
+    assert lines[-1] == "  all after: 1/2 exact, 1 within one"

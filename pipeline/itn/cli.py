@@ -149,6 +149,13 @@ def _scope_ids(conn, args) -> list[str]:
         q += " AND extract(year FROM effective_date) BETWEEN %s AND %s"; params += [int(lo), int(hi or lo)]
     if args.unscored:
         q += " AND NOT EXISTS (SELECT 1 FROM score s WHERE s.artifact_id = artifact.id AND s.current)"
+    if getattr(args, "unreviewed", False):
+        # Items whose current score is the economy model's own: not pre-sorted, not reviewed.
+        from itn.analyze.rubric import load_rubric
+        q += (" AND EXISTS (SELECT 1 FROM score s JOIN analysis an ON an.id = s.analysis_id"
+              " WHERE s.artifact_id = artifact.id AND s.current AND an.rubric_version = %s"
+              " AND an.kind IN ('type_assessment', 'verification'))")
+        params.append(f"{load_rubric()['version']}-economy")
     rows = conn.execute(q + " ORDER BY effective_date, id", params).fetchall()
     conn.commit()
     return [r[0] for r in rows]
@@ -245,7 +252,7 @@ def _dry_run(args) -> None:
 def cmd_analyze(args) -> None:
     """Paid analysis. Only the `paid` GitHub environment has the API key."""
     scope = {"ids": args.ids, "type": args.type, "years": args.years, "unscored": args.unscored,
-             "pilot": args.pilot, "sample": args.sample, "compare": args.compare, "profile": args.profile}
+             "unreviewed": args.unreviewed, "pilot": args.pilot, "sample": args.sample, "compare": args.compare, "profile": args.profile}
     print(f"Scope: {scope}  budget: ${args.budget:.2f}  max tier: {args.max_tier}  dry run: {args.dry_run}")
     if args.dry_run:
         _dry_run(args)
@@ -328,8 +335,8 @@ def cmd_calibration(args) -> None:
 
 
 def cmd_review(args) -> None:
-    """Free: export review packets for a session reviewer, import its answers, or re-apply
-    the fixed rules to stored scores."""
+    """Free: export review packets for a session reviewer, import its answers, re-apply
+    the fixed rules to stored scores, or compare a trial run with the reviewed ratings."""
     from pathlib import Path
 
     from itn.analyze import review
@@ -357,6 +364,10 @@ def cmd_review(args) -> None:
     elif args.action == "rescore":
         from itn.storage import R2
         review.rescore_rules(R2(), rubric, log=lambda m: print(m, flush=True), dry_run=args.dry_run)
+    elif args.action == "agreement":
+        with db.connect() as conn:
+            for line in review.agreement(conn, rubric):
+                print(line)
     else:
         review.import_answers(rubric, [Path(p) for p in args.packets], [Path(p) for p in args.answers],
                               args.reviewer, log=lambda m: print(m, flush=True))
@@ -393,6 +404,8 @@ def main(argv=None) -> None:
     an.add_argument("--type", choices=["scotus_case", "public_law", "executive_document", "action_event"])
     an.add_argument("--years", help="e.g. 2001-2004")
     an.add_argument("--unscored", action="store_true")
+    an.add_argument("--unreviewed", action="store_true",
+                    help="only items whose current score is the economy model's own (re-score after a rubric wording change)")
     an.add_argument("--budget", type=float, default=0.0, help="hard cap in USD (required for paid runs)")
     an.add_argument("--max-tier", choices=["haiku", "sonnet", "opus"], default="sonnet")
     an.add_argument("--dry-run", action="store_true")
@@ -406,7 +419,7 @@ def main(argv=None) -> None:
     an.set_defaults(fn=cmd_analyze)
 
     rv = sub.add_parser("review", help="session review packets and answers (free, no model API)")
-    rv.add_argument("action", choices=["export", "import", "rescore"])
+    rv.add_argument("action", choices=["export", "import", "rescore", "agreement"])
     rv.add_argument("--dry-run", action="store_true", help="rescore: log the changes, write nothing")
     rv.add_argument("--sample-band", nargs=2, type=float, metavar=("LOW", "HIGH"),
                     help="export --sample: only model-rated items with raw score in [LOW, HIGH)")
