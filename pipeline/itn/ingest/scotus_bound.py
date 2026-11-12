@@ -19,6 +19,7 @@ from pypdf import PdfReader
 from itn import db, http, ids
 from itn.extract import citations
 from itn.http import get
+from itn.ingest import scotus_repair
 from itn.ingest import supremecourt_gov as sc
 
 OYEZ = "https://api.oyez.org"
@@ -126,8 +127,11 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
     done = set(cursor.get("done_pdfs_v6", []))
     count = 0
     with http.client(timeout=600) as client:
+        # Oyez lists argued cases; the Court's slip opinion lists (from October Term 2017)
+        # also name the unargued per curiams. The window's decision dates span terms
+        # 2013 through 2019.
         names: dict[str, dict] = {}
-        for term in range(FIRST_TERM, LAST_TERM + 1):
+        for term in range(FIRST_TERM - 1, LAST_TERM + 2):
             try:
                 for case in oyez_cases(client, term):
                     if case.get("docket_number"):
@@ -135,6 +139,8 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
             except Exception as err:  # noqa: BLE001 - names are a nicety; dockets still work
                 print(f"Oyez term {term} unavailable: {str(err)[:200]}", flush=True)
         print(f"Oyez: {len(names)} case names", flush=True)
+        listed = scotus_repair.slip_names(client, list(range(FIRST_TERM - 1, LAST_TERM + 2)),
+                                          log=lambda m: print(m, flush=True))
         resp = get(client, VOLUMES_PAGE)
         resp.raise_for_status()
         pdfs = volume_pdfs(resp.text, str(resp.url))
@@ -173,7 +179,8 @@ def run(conn, r2=None, fetch_text: bool = True, max_minutes: float = 170, **_) -
                     if not parts:
                         continue
                     oyez = names.get(case["docket"]) or {}
-                    row = {**case, "name": oyez.get("name") or f"No. {case['docket']}",
+                    row = {**case, "name": (oyez.get("name") or listed.get(case["docket"])
+                                           or scotus_repair.caption_name(texts[i]) or f"No. {case['docket']}"),
                            "pdf": url, "page": i + 1, "oyez": oyez.get("href")}
                     if cite:
                         row["us_cite"] = cite

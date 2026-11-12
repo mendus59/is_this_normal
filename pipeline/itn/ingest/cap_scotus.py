@@ -89,6 +89,9 @@ def is_decision(case: dict) -> bool:
     """A Court opinion of real length; a long dissent from a denial of certiorari is
     still an order."""
     opinions = (case.get("casebody") or {}).get("opinions") or []
+    from itn.ingest.scotus_repair import is_denial
+    if opinions and is_denial(opinions[0].get("text")):
+        return False  # CAP files some statements on a denial as the majority opinion
     return any(KINDS.get((op.get("type") or "").lower()) in ("majority", "plurality", "unanimous")
                and len(op.get("text") or "") >= MIN_OPINION_CHARS for op in opinions)
 

@@ -51,8 +51,16 @@ combine:
 # Fixed rules that settle a dimension from the record without a model judgment.
 # express_overruling_precedent: a ruling whose controlling opinion expressly overrules
 # one of the Court's cases ("Roe and Casey are overruled") is rated this on precedent.
+# ruling_procedure: how a ruling reached the Court and was disposed of, read from its caption
+# and opening, sets the procedure rating. Ordinary argued cases are left to the assessment.
 rules:
   express_overruling_precedent: 0
+  ruling_procedure:
+    emergency_unargued: 1       # emergency application decided without oral argument
+    emergency_argued: 2         # emergency application decided after oral argument
+    summary_disposition: 2      # decided on the petition, without merits briefing or argument
+    dismissed_improvidently: 2  # certiorari granted, then dismissed
+    in_chambers: 3              # a single Justice's ruling on an application
 
 verification:
   second_pass_bands: [novel, unprecedented]

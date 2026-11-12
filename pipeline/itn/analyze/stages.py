@@ -575,8 +575,10 @@ def combine(rubric: dict, item, out_dims: dict, allowed: set[str], same_actor: d
 
 def apply_rules(rubric: dict, item, dims: dict, raw, conf, facts: dict):
     """Fixed rules that replace a model judgment when the record settles it. Each rule
-    names its evidence. Today: a ruling whose controlling opinion expressly overrules
-    one of the Court's cases gets the rubric's rating on precedent."""
+    names its evidence. A ruling whose controlling opinion expressly overrules one of the
+    Court's cases gets the rubric's rating on precedent (only ever lowering it). A ruling
+    that came by emergency application, summary disposition, dismissal or in chambers gets
+    the rubric's rating for that path on procedure, up or down."""
     rules = rubric.get("rules") or {}
     rating = rules.get("express_overruling_precedent")
     passages = (facts or {}).get("expressly_overrules")
@@ -587,6 +589,18 @@ def apply_rules(rubric: dict, item, dims: dict, raw, conf, facts: dict):
                                  "evidence": sorted(set(d.get("evidence") or []) | {item.id}),
                                  "reason": f"Rule: the controlling opinion expressly overrules: {passages[0][:300]}",
                                  "rule": "express_overruling"}
+            valid = [x["final"] for x in dims.values() if x["final"] >= 0]
+            raw = overall(valid, cap_of(rubric))
+            conf = max(conf, len(valid) / len(dims))
+    path = (facts or {}).get("ruling_path") or {}
+    rating = (rules.get("ruling_procedure") or {}).get(path.get("kind"))
+    if item.type == "scotus_case" and rating is not None and "procedure" in dims:
+        d = dims["procedure"]
+        if d["final"] != rating or d.get("rule") != "ruling_procedure":
+            dims["procedure"] = {**d, "rating": rating, "rating_independent": rating, "final": rating,
+                                 "evidence": sorted(set(d.get("evidence") or []) | {item.id}),
+                                 "reason": f"Rule: this was {path['description']}.",
+                                 "rule": "ruling_procedure", "same_actor_cap": False}
             valid = [x["final"] for x in dims.values() if x["final"] >= 0]
             raw = overall(valid, cap_of(rubric))
             conf = max(conf, len(valid) / len(dims))

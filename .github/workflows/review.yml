@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "export packets, import answers, or rescore (re-apply fixed rules to stored scores)"
+        description: "export packets, import answers, or rescore (re-apply fixed rules to stored scores; the dry run only lists the changes)"
         type: choice
-        options: [export, import, rescore]
+        options: [export, import, rescore, rescore-dry-run]
         default: export
       ids:
         description: "export: these artifact IDs instead of a selection (space separated)"
@@ -90,3 +90,6 @@ jobs:
       - name: Re-apply fixed rules to stored scores
         if: inputs.action == 'rescore'
         run: itn review rescore
+      - name: List what re-applying the fixed rules would change
+        if: inputs.action == 'rescore-dry-run'
+        run: itn review rescore --dry-run

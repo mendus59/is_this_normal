@@ -202,6 +202,60 @@ EMERGENCY_STATUTES = {
 STATUTE_HISTORY_MAX = 8
 
 
+# How a ruling reached the Court and was disposed of, read from its caption and opening. The
+# model rated nearly every emergency application, summary disposition and dismissal alike;
+# the path is in the text, so a rule (rubric `rules.ruling_procedure`) sets it the same way
+# every time. Ordinary argued cases return None and stay with the model.
+_ARGUED = re.compile(r"\bArgued\s+[A-Z][a-z]+\s+\d{1,2}(?:\s*[–-]\s*\d{1,2})?,\s+\d{4}")
+_PER_CURIAM = re.compile(r"^\s*per\s+curiam\.?\s*$", re.IGNORECASE | re.MULTILINE)
+_IN_CHAMBERS = re.compile(r"\bCircuit\s+Justice\b|\bIN\s+CHAMBERS\b")
+# Caption lines of the bound volumes: "on application for stay", "on petition for writ of
+# certiorari to ..." (an argued case reads "certiorari to ...").
+_CAPTION_APPLICATION = re.compile(r"^\s*on\s+applications?\b", re.MULTILINE)
+_CAPTION_PETITION = re.compile(r"^\s*on\s+petitions?\s+for\s+(?:an?\s+)?writs?\s+of\s+certiorari\b", re.MULTILINE)
+_APPLICATION = re.compile(r"\bapplications?\s+(?:for\s+(?:an?\s+|the\s+)?(?:stay|injuncti\w+|vacatur|recall)"
+                          r"|to\s+(?:vacate|stay|recall|enjoin))", re.IGNORECASE)
+_SUMMARY = re.compile(r"\bpetitions?\s+for\s+(?:an?\s+)?writs?\s+of\s+certiorari(?:\s+and\s+[^.]{0,160})?\s+(?:is|are)\s+granted"
+                      r"|\bwe\s+(?:therefore\s+|accordingly\s+)?grant\s+(?:the|his|her|its|their)\s+petitions?\s+for\s+"
+                      r"(?:an?\s+)?(?:writs?\s+of\s+)?certiorari", re.IGNORECASE)
+_DIG = re.compile(r"\b(?:is|are)\s+dismissed\s+as\s+improvidently\s+granted", re.IGNORECASE)
+HEAD_CHARS, OPENING_CHARS = 1500, 500
+PATHS = {
+    "in_chambers": "an application decided by a single Justice in chambers",
+    "emergency_unargued": "an emergency application decided without oral argument",
+    "emergency_argued": "an emergency application decided after oral argument",
+    "dismissed_improvidently": "certiorari granted, then dismissed as improvidently granted",
+    "summary_disposition": "a summary disposition on the petition, without merits briefing or oral argument",
+}
+
+
+def _after_per_curiam(body: str) -> str:
+    m = _PER_CURIAM.search(body[:HEAD_CHARS * 4])
+    return body[m.end():m.end() + OPENING_CHARS] if m else ""
+
+
+def ruling_path(summary: str | None, text: str | None) -> str | None:
+    """One of PATHS' keys, or None for an ordinary argued case (or when the text does not
+    say). `summary` is the syllabus page, which carries the caption where the source has
+    one; without it the opinion's own first page may."""
+    body = text or ""
+    head = (summary or "")[:HEAD_CHARS] + "\n" + body[:HEAD_CHARS]
+    opening = body[:OPENING_CHARS]
+    per_curiam = bool(_PER_CURIAM.search(head))
+    if _IN_CHAMBERS.search(head[:OPENING_CHARS]) or _IN_CHAMBERS.search(opening[:300]):
+        return "in_chambers"
+    argued = bool(_ARGUED.search(head))
+    if _CAPTION_APPLICATION.search(head) or (per_curiam and _APPLICATION.search(_after_per_curiam(body))):
+        return "emergency_argued" if argued else "emergency_unargued"
+    if argued:
+        return None
+    if per_curiam and _DIG.search(body):
+        return "dismissed_improvidently"
+    if _CAPTION_PETITION.search(head) or (per_curiam and _SUMMARY.search(body)):
+        return "summary_disposition"
+    return None
+
+
 def express_overrulings(text: str) -> list[str]:
     """Sentences in which the opinion itself overrules, free of negation."""
     out = []
@@ -262,8 +316,12 @@ def record_facts(conn, item: Item, text: str | None = None, cited: list[str] | N
         hits = [" ".join(m.group(0).split()) for m in _OVERRULE.finditer(text)]
         hits = list(dict.fromkeys(hits))[:6]
         express = express_overrulings(text)[:3]
-        return {"overruling_passages": hits or "none in the controlling opinion",
-                "expressly_overrules": express or False}
+        facts = {"overruling_passages": hits or "none in the controlling opinion",
+                 "expressly_overrules": express or False}
+        path = ruling_path(item.summary, text)
+        if path:
+            facts["ruling_path"] = {"kind": path, "description": PATHS[path]}
+        return facts
     if item.type == "executive_document":
         powers = sorted({EMERGENCY_STATUTES[c] for c in cited if c in EMERGENCY_STATUTES})
         return {"emergency_powers_invoked": powers or "none of the listed emergency statutes",

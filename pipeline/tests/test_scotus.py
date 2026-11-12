@@ -202,3 +202,85 @@ def test_courtlistener_docket_and_orders_filter():
     assert not is_decision(order)
     assert not is_decision(dissent_from_denial)
     assert is_decision(ruling)
+
+
+def test_denials_of_certiorari_are_not_rulings():
+    from itn.ingest.cap_scotus import is_decision
+    from itn.ingest.scotus_repair import is_denial
+    statement = ("Ct. App. Ohio, Lucas County. Certiorari denied.\nStatement of Justice Breyer, with whom Justice Stevens "
+                 "joins, respecting the denial of the petition for writ of certiorari.\n" + "x" * 5000)
+    assert is_denial(statement)
+    assert is_denial("Justice Alito, with whom Justice Thomas joins, dissenting from the denial of certiorari.")
+    assert not is_decision({"casebody": {"opinions": [{"type": "majority", "text": statement}]}})
+    assert not is_denial("Justice Breyer delivered the opinion of the Court. The court affirmed, cert. denied, "
+                         "531 U. S. 1, and we granted certiorari.")
+    assert not is_denial("Per Curiam. After this Court denied certiorari, respondent filed a second petition.")
+    assert not is_denial("Chief Justice Rehnquist, Circuit Justice. This case is before me on an application.")
+
+
+def test_drop_denials_marks_orders():
+    from itn.ingest import scotus_repair
+
+    class Conn:
+        def __init__(self):
+            self.updates = []
+
+        def execute(self, q, p=()):
+            if q.startswith("SELECT DISTINCT"):
+                return type("R", (), {"fetchall": lambda s: [("scotus/534-us-982", "Overton v. Ohio", "k1"),
+                                                             ("scotus/528-us-62", "Kimel", "k2")]})()
+            self.updates.append(p)
+
+        def commit(self):
+            pass
+
+    class R2:
+        def get_text(self, key):
+            return {"k1": "Ct. App. Ohio. Certiorari denied. Statement of Justice Breyer", "k2": "Justice O'Connor delivered"}[key]
+
+    conn = Conn()
+    assert scotus_repair.drop_denials(conn, R2(), log=lambda m: None) == 1
+    assert conn.updates == [(["scotus/534-us-982"],)]
+
+
+def test_caption_names():
+    from itn.ingest.scotus_repair import caption_name
+    assert caption_name("OCTOBER TERM, 2019 423\nREPUBLICAN NATIONAL COMMITTEE et al. v.\nDEMOCRATIC NATIONAL COMMITTEE "
+                        "et al.\non application for stay\nNo. 19A1016.") == "Republican National Committee v. Democratic National Committee"
+    assert caption_name("OCTOBER TERM, 2019 979\nBARR, ATTORNEY GENERAL, et al. v. LEE et al.\non application for stay "
+                        "or vacatur\nNo. 20A8.") == "Barr v. Lee"
+    assert caption_name("OCTOBER TERM, 2017 29\nIN RE UNITED STATES et al.\non petition for writ of mandamus") == "In re United States"
+    assert caption_name("616 OCTOBER TERM, 2013\nSyl\nlabus\nHARRIS et al. v. QUINN, GOVERNOR OF ILLINOIS,\net al.\n"
+                        "certiorari to the united states court of appeals") == "Harris v. Quinn"
+    # The PDF text often loses part of the caption; a partial one is not a name.
+    assert caption_name("OCTOBER TERM, 2019 197\nPROTECTION BUREAU\ncertiorari to the united states") is None
+    assert caption_name("OCTOBER TERM, 2019 345\non petition for writ of certiorari to the united") is None
+
+
+def test_retitle_prefers_listed_names(monkeypatch):
+    import datetime as dt
+    from itn.ingest import scotus_repair
+
+    rows = [("scotus/590-us-83", "No. 18-5924", dt.date(2020, 4, 20), "18-5924", "OCTOBER TERM, 2019 83\ncertiorari to", None),
+            ("scotus/591-us-979", "No. 20A8", dt.date(2020, 7, 14), "20A8",
+             "OCTOBER TERM, 2019 979\nBARR, ATTORNEY GENERAL, et al. v. LEE et al.\non application for stay", None),
+            ("scotus/589-us-999", "No. 19-1", dt.date(2020, 3, 2), "19-1", "OCTOBER TERM, 2019 999\ncertiorari to", None)]
+
+    class Conn:
+        def __init__(self):
+            self.updates = []
+
+        def execute(self, q, p=()):
+            if q.startswith("SELECT"):
+                return type("R", (), {"fetchall": lambda s: rows})()
+            self.updates.append(p)
+
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(scotus_repair, "listed_names", lambda client, terms, log: {"18-5924": "Ramos v. Louisiana"})
+    conn, tried = Conn(), set()
+    assert scotus_repair.retitle(conn, None, None, tried, log=lambda m: None) == 2
+    assert conn.updates == [("Ramos v. Louisiana", "scotus/590-us-83"), ("Barr v. Lee", "scotus/591-us-979")]
+    assert tried == {r[0] for r in rows}
+    assert scotus_repair.retitle(conn, None, None, tried, log=lambda m: None) == 0   # not retried every day
