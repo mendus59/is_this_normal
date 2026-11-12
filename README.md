@@ -1,5 +1,16 @@
 # IsThisNormal
 
+<!-- site-summary:start -->
+<!-- This section is this project's card on https://mendus59.github.io and is copied there daily.
+     Keep it true of what's on main: one plain-text summary line (max 160 characters), then 1-6 short bullets.
+     See CLAUDE.md ("Site summary"). -->
+Is a Supreme Court ruling, executive action or contentious law "normal"?
+
+- Measures each ruling, executive action and contentious law since 2000 against the precedent, statute text and public data that existed when it happened.
+- Free daily ingestion of public records (Federal Register, Congress, Supreme Court opinions) into a citation graph.
+- AI analysis scored against versioned rubrics, which only runs on approval and within a set budget.
+<!-- site-summary:end -->
+
 Is a Supreme Court ruling, executive action, or contentious law "normal"? This
 project measures each one since 2000 against the precedent, statute text,
 comparable actions, and public data that existed when it happened.
