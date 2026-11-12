@@ -27,6 +27,9 @@ on:
       limit:
         description: "export: most packets"
         default: "100"
+      sample:
+        description: "export: a random spot check instead, this many items per type, any score"
+        required: false
       batch:
         description: "batch name: export writes reviews/<batch>/packets.jsonl; import reads reviews/<batch>/"
         required: false
@@ -51,6 +54,7 @@ jobs:
       IDS: ${{ inputs.ids }}
       TYPE: ${{ inputs.type }}
       BATCH: ${{ inputs.batch }}
+      SAMPLE: ${{ inputs.sample }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,6 +71,7 @@ jobs:
                 --limit "${{ inputs.limit }}" --out "reviews/$BATCH/packets.jsonl")
           [ -n "$IDS" ] && args+=(--ids $IDS)
           [ -n "$TYPE" ] && args+=(--type "$TYPE")
+          case "$SAMPLE" in "") ;; *[!0-9]*) echo "sample must be a number"; exit 1;; *) args+=(--sample "$SAMPLE" --seed "$BATCH");; esac
           itn review export "${args[@]}"
       - name: Push packets to branch review/<batch>
         if: inputs.action == 'export'

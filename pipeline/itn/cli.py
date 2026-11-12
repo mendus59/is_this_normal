@@ -338,8 +338,16 @@ def cmd_review(args) -> None:
     if args.action == "export":
         from itn.storage import R2
         with db.connect() as conn:
-            ids = args.ids or review.select(conn, args.max_raw, args.min_confidence, args.type or None,
-                                            args.limit, args.reviewer)
+            print("Not yet reviewed (type, pre-sorted, raw band 0 least normal to 4, count):")
+            for row in review.backlog(conn, args.reviewer):
+                print("  backlog", *row)
+            if args.ids:
+                ids = args.ids
+            elif args.sample:
+                ids = review.sample(conn, args.sample, args.seed, args.reviewer)
+            else:
+                ids = review.select(conn, args.max_raw, args.min_confidence, args.type or None,
+                                    args.limit, args.reviewer)
         print(f"Exporting {len(ids)} review packets", flush=True)
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -403,6 +411,9 @@ def main(argv=None) -> None:
     rv.add_argument("--min-confidence", type=float, default=0.0, help="export: or confidence below this")
     rv.add_argument("--type", nargs="*", choices=["scotus_case", "public_law", "executive_document", "action_event"])
     rv.add_argument("--limit", type=int, default=100)
+    rv.add_argument("--sample", type=int, default=0,
+                    help="export: a random spot check instead, this many items per type, any score")
+    rv.add_argument("--seed", default="1", help="export: seed of the random spot check")
     rv.add_argument("--out", default="review-packets.jsonl")
     rv.add_argument("--packets", nargs="*", default=[], help="import: packet files")
     rv.add_argument("--answers", nargs="*", default=[], help="import: answer files")
