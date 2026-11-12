@@ -112,6 +112,11 @@ def caption_name(text: str | None) -> str | None:
     return _title_case(name)
 
 
+# Unargued per curiams that no list names and whose printed caption the PDF text lost. Each
+# is applied only if the party's name appears in the stored opinion.
+KNOWN = {"19-5421": "Davis v. United States", "18-9674": "Andrus v. Texas"}
+
+
 def clean_docket(docket: str | None) -> str:
     return re.sub(r"^Nos?\.?\s*", "", (docket or "").strip()).replace("–", "-")
 
@@ -159,7 +164,7 @@ def retitle(conn, r2, client, tried: set[str], log=print) -> int:
         "  ORDER BY c.ord LIMIT 1) FROM artifact a"
         " WHERE a.type = 'scotus_case' AND a.title ~ %s ORDER BY a.id", (_UNNAMED,)).fetchall()
     conn.commit()
-    rows = [r for r in rows if r[0] not in tried]
+    rows = [r for r in rows if r[0] not in tried or clean_docket(r[3] or r[1]) in KNOWN]
     if not rows:
         return 0
     terms = sorted({sc.term_of(r[2]) for r in rows if r[2]})
@@ -171,6 +176,10 @@ def retitle(conn, r2, client, tried: set[str], log=print) -> int:
         name = names.get(docket) or caption_name(summary)
         if not name and key and r2:
             name = caption_name((r2.get_text(key) or "")[:2000])
+        if not name and docket in KNOWN and r2:
+            text = (summary or "") + ((r2.get_text(key) or "")[:6000] if key else "")
+            if KNOWN[docket].split()[0] in text:
+                name = KNOWN[docket]
         tried.add(aid)
         if not name:
             log(f"  no name found: {aid} {title}")

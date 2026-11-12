@@ -345,7 +345,8 @@ def cmd_review(args) -> None:
             if args.ids:
                 ids = args.ids
             elif args.sample:
-                ids = review.sample(conn, args.sample, args.seed, args.reviewer)
+                ids = review.sample(conn, args.sample, args.seed, args.reviewer,
+                                    tuple(args.sample_band) if args.sample_band else None)
             else:
                 ids = review.select(conn, args.max_raw, args.min_confidence, args.type or None,
                                     args.limit, args.reviewer)
@@ -407,6 +408,8 @@ def main(argv=None) -> None:
     rv = sub.add_parser("review", help="session review packets and answers (free, no model API)")
     rv.add_argument("action", choices=["export", "import", "rescore"])
     rv.add_argument("--dry-run", action="store_true", help="rescore: log the changes, write nothing")
+    rv.add_argument("--sample-band", nargs=2, type=float, metavar=("LOW", "HIGH"),
+                    help="export --sample: only model-rated items with raw score in [LOW, HIGH)")
     rv.add_argument("--reviewer", default="claude-fable-5-2 (session)", help="recorded as the score's model")
     rv.add_argument("--ids", nargs="*", default=[], help="export: these ids instead of a selection")
     rv.add_argument("--max-raw", type=float, default=0.6, help="export: current raw below this (0.6 = unusual or less normal)")

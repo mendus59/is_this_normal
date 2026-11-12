@@ -51,19 +51,22 @@ def backlog(conn, reviewer: str) -> list[tuple]:
         " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3", ("%-economy", f"%{REVIEW_SUFFIX}", reviewer)).fetchall()
 
 
-def sample(conn, per_type: int, seed: str, reviewer: str) -> list[str]:
+def sample(conn, per_type: int, seed: str, reviewer: str, band: tuple[float, float] | None = None) -> list[str]:
     """A spot check: a repeatable random draw of current economy scores of every kind (model
     rated or pre-sorted routine, any score), the same number per type, skipping items this
-    reviewer already settled. The order depends only on the seed and the item id."""
+    reviewer already settled. The order depends only on the seed and the item id. With
+    `band` (low, high), only model-rated items whose raw score is in [low, high)."""
+    lo, hi = band or (None, None)
     rows = conn.execute(
         "SELECT artifact_id FROM (SELECT s.artifact_id, row_number() OVER (PARTITION BY a.type"
         "   ORDER BY md5(%s || s.artifact_id)) AS n"
         " FROM score s JOIN analysis an ON an.id = s.analysis_id JOIN artifact a ON a.id = s.artifact_id"
-        " WHERE s.current AND an.rubric_version LIKE %s"
+        " WHERE s.current AND a.in_scope AND an.rubric_version LIKE %s"
+        " AND (%s::float IS NULL OR (an.model <> 'rule' AND s.raw >= %s AND s.raw < %s))"
         " AND NOT EXISTS (SELECT 1 FROM analysis r WHERE r.subject_id = s.artifact_id"
         "                 AND r.rubric_version LIKE %s AND r.model = %s)) t"
         " WHERE n <= %s ORDER BY artifact_id",
-        (seed, "%-economy", f"%{REVIEW_SUFFIX}", reviewer, per_type)).fetchall()
+        (seed, "%-economy", lo, lo, hi, f"%{REVIEW_SUFFIX}", reviewer, per_type)).fetchall()
     return [r[0] for r in rows]
 
 
