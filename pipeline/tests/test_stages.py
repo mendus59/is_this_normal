@@ -277,6 +277,20 @@ def test_conditions_history_and_quotes_are_not_express():
         assert data.express_overrulings(s) == [s], s
 
 
+def test_adverbs_and_commas_inside_an_express_overruling():
+    from itn.analyze import data
+    for s in ("Finding Ford inconsistent with that line of cases, we consequently overrule Ford insofar as it "
+              "would otherwise apply.",
+              "Quill and National Bellas Hess should be, and now are, overruled.",
+              "It is, accordingly, overruled.",
+              "We now expressly overrule Spaziano and Hildwin in relevant part."):
+        assert data.express_overrulings(s) == [s], s
+    for s in ("We do not, therefore, overrule Smith.",
+              "Kansas' objection is, accordingly, overruled.",
+              "The dissent says Smith is, consequently, overruled."):
+        assert data.express_overrulings(s) == [], s
+
+
 def test_overruled_exceptions_are_not_precedent():
     from itn.analyze import data
     assert data.express_overrulings("For the reasons we discuss, Alaska's exceptions are overruled. "
