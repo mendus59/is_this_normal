@@ -117,6 +117,9 @@ MIN_DECISION_CHARS = 3000
 def is_decision(comps: list[tuple[dict, str]]) -> bool:
     """A Court opinion of real length. Orders lists (cert denied, often with a dissent
     from the denial) come through the API as cases too; they aren't rulings."""
+    from itn.ingest.scotus_repair import is_denial
+    if comps and is_denial(comps[0][1]):
+        return False
     return any(c["kind"] in LEAD_KINDS and len(text or "") >= MIN_DECISION_CHARS
                for c, text in comps)
 

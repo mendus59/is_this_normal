@@ -103,6 +103,8 @@ def _facts(facts: dict, answer: dict | None = None) -> dict:
     a packet exported before a rule fix does not carry a false positive into the score. The
     reviewer read those sentences: a reviewed precedent rating above 0 means the reviewer
     judged that none of them is the Court overruling a precedent, and that judgment stands."""
+    # The reviewer saw how the ruling reached the Court; the reviewed procedure rating stands.
+    facts = {k: v for k, v in facts.items() if k != "ruling_path"}
     express = facts.get("expressly_overrules")
     if isinstance(express, list):
         kept = [s for s in express if data.express_overrulings(s)]
@@ -181,18 +183,25 @@ def import_answers(rubric: dict, packets: list[Path], answers: list[Path], revie
     return written
 
 
-def rescore_rules(r2, rubric: dict, log=print) -> tuple[int, int]:
-    """Free: re-check stored economy scores whose precedent rating was set by the
-    express-overruling rule. The facts are rebuilt with the current rule; where it no longer
-    fires, the score is rebuilt from the model output already stored (and paid for), exactly
-    as the run combined it. Returns (rescored, still set by the rule)."""
+RULES = {"precedent": "express_overruling", "procedure": "ruling_procedure"}
+
+
+def rescore_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> tuple[int, int]:
+    """Free: re-apply the fixed rules to stored, unreviewed economy scores after a rule
+    changes. First, scores a rule had set are rebuilt from the model output already stored
+    (and paid for), exactly as the run combined it, and the current rules are applied again,
+    so a rule that no longer fires is undone. Then every other ruling is checked for rules
+    that fire now. Returns (scores changed, scores a rule still sets). With `dry_run`,
+    changes are logged and nothing is written."""
     rv = f"{rubric['version']}-economy"
     with db.connect() as c:
         rows = c.execute(
-            "SELECT s.artifact_id, s.analysis_id, an.kind FROM score s JOIN analysis an ON an.id = s.analysis_id"
+            "SELECT s.artifact_id, s.analysis_id, an.kind, s.dimensions FROM score s"
+            " JOIN analysis an ON an.id = s.analysis_id"
             " WHERE s.current AND an.rubric_version = %s"
-            " AND s.dimensions->'precedent'->>'rule' = 'express_overruling' ORDER BY s.artifact_id", (rv,)).fetchall()
-    log(f"{len(rows)} current scores have precedent set by the express-overruling rule")
+            " AND (s.dimensions->'precedent'->>'rule' = 'express_overruling'"
+            "  OR s.dimensions->'procedure'->>'rule' = 'ruling_procedure') ORDER BY s.artifact_id", (rv,)).fetchall()
+    log(f"{len(rows)} current scores have a rating set by a rule")
     pipe = Pipeline(r2, None, rubric, 0, "haiku", profile="economy", record_run=False)
     changed = kept = 0
     for start in range(0, len(rows), CHUNK):
@@ -201,12 +210,9 @@ def rescore_rules(r2, rubric: dict, log=print) -> tuple[int, int]:
             items = {i.id: i for i in data.load_items(c, [r[0] for r in part])}
         inp = pipe.economy_inputs(list(items.values()))
         with db.connect() as c:
-            for artifact_id, analysis_id, kind in part:
+            for artifact_id, analysis_id, kind, stored in part:
                 item = items.get(artifact_id)
                 if item is None:
-                    continue
-                if inp["facts"][item.id].get("expressly_overrules"):
-                    kept += 1
                     continue
                 allowed = set(inp["allowed"][item.id])
                 finals = data.same_actor_finals(c, item, sorted(allowed))
@@ -222,35 +228,47 @@ def rescore_rules(r2, rubric: dict, log=print) -> tuple[int, int]:
                             dims, raw, conf = merge(d1, dims, c1, cap_of(rubric))
                 if raw is None:
                     continue
-                c.execute("UPDATE score SET dimensions = %s, raw = %s, confidence = %s"
-                          " WHERE artifact_id = %s AND analysis_id = %s",
-                          (Jsonb(dims), raw, conf, item.id, analysis_id))
+                dims, raw, conf = apply_rules(rubric, item, dims, raw, conf, inp["facts"][item.id])
+                if _ruled(dims):
+                    kept += 1
+                if _ruled(dims) == _ruled(stored or {}) and all(
+                        dims[k].get("final") == (stored or {}).get(k, {}).get("final") for k in dims):
+                    continue
+                log(f"  {item.id}: rules {_ruled(stored or {}) or 'none'} -> {_ruled(dims) or 'none'}")
+                if not dry_run:
+                    c.execute("UPDATE score SET dimensions = %s, raw = %s, confidence = %s"
+                              " WHERE artifact_id = %s AND analysis_id = %s",
+                              (Jsonb(dims), raw, conf, item.id, analysis_id))
                 changed += 1
             c.commit()
         log(f"  {min(start + CHUNK, len(rows))} of {len(rows)} checked")
-    log(f"Rescored {changed}; {kept} still expressly overrule")
-    added = apply_new_overrulings(r2, rubric, log)
-    log(f"{added} more rulings now set by the express-overruling rule")
-    return changed, kept
+    log(f"Rescored {changed}; {kept} still set by a rule")
+    added = apply_new_rules(r2, rubric, log, dry_run)
+    log(f"{added} more rulings now have a rating set by a rule" + (" (dry run: nothing written)" if dry_run else ""))
+    return changed + added, kept
 
 
-def apply_new_overrulings(r2, rubric: dict, log=print) -> int:
-    """Free: the other direction of a rule fix. Scan every unreviewed economy score of a ruling
-    that the rule did not set, and where the current rule finds an express overruling in the
-    stored opinion text, apply it to the stored dimensions. Reviewed scores are left alone:
-    the reviewer read the passages and that judgment stands."""
-    rating = (rubric.get("rules") or {}).get("express_overruling_precedent")
-    if rating is None:
+def _ruled(dims: dict) -> list[str]:
+    return sorted(k for k, name in RULES.items() if (dims.get(k) or {}).get("rule") == name)
+
+
+def apply_new_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> int:
+    """Free: the other direction of a rule change. Scan every unreviewed economy score of a
+    ruling for rules that fire on the stored opinion text but are not yet applied, and apply
+    them to the stored dimensions. Reviewed scores are left alone: the reviewer read the
+    material and that judgment stands."""
+    if not rubric.get("rules"):
         return 0
     rv = f"{rubric['version']}-economy"
     with db.connect() as c:
         rows = c.execute(
             "SELECT s.artifact_id, s.analysis_id, s.dimensions, s.raw, s.confidence FROM score s"
             " JOIN analysis an ON an.id = s.analysis_id JOIN artifact a ON a.id = s.artifact_id"
-            " WHERE s.current AND an.rubric_version = %s AND a.type = 'scotus_case'"
-            " AND s.dimensions->'precedent'->>'rule' IS NULL ORDER BY s.artifact_id", (rv,)).fetchall()
-    log(f"{len(rows)} unreviewed rulings checked for express overrulings the rule missed")
-    added = 0
+            " WHERE s.current AND an.rubric_version = %s AND a.type = 'scotus_case' AND a.in_scope"
+            " AND (s.dimensions->'precedent'->>'rule' IS NULL OR s.dimensions->'procedure'->>'rule' IS NULL)"
+            " ORDER BY s.artifact_id", (rv,)).fetchall()
+    log(f"{len(rows)} unreviewed rulings checked for rules that now fire")
+    added, tally = 0, {}
     for start in range(0, len(rows), CHUNK):
         part = rows[start:start + CHUNK]
         with db.connect() as c:
@@ -258,21 +276,31 @@ def apply_new_overrulings(r2, rubric: dict, log=print) -> int:
         hits = []
         for artifact_id, analysis_id, dims, raw, conf in part:
             item = items.get(artifact_id)
-            if item is None or "precedent" not in dims:
+            if item is None:
                 continue
-            express = data.express_overrulings(data.text_of(r2, item.text_keys, data.TEXT_MAX_CHARS))[:3]
-            if not express:
+            text = data.text_of(r2, item.text_keys, data.TEXT_MAX_CHARS)
+            facts = {"expressly_overrules": data.express_overrulings(text)[:3] or False}
+            path = data.ruling_path(item.summary, text)
+            if path:
+                facts["ruling_path"] = {"kind": path, "description": data.PATHS[path]}
+            before = {k: (dims.get(k) or {}).get("final") for k in RULES}
+            was = _ruled(dims)
+            dims, raw, conf = apply_rules(rubric, item, dims, raw, conf, facts)
+            new = [k for k in _ruled(dims) if k not in was]
+            if not new:
                 continue
-            before = dims["precedent"].get("final")
-            dims, raw, conf = apply_rules(rubric, item, dims, raw, conf, {"expressly_overrules": express})
-            if dims["precedent"].get("rule"):
-                log(f"  {item.id}: precedent {before} -> {rating}: {express[0][:160]}")
-                hits.append((Jsonb(dims), raw, conf, item.id, analysis_id))
-        if hits:
+            for k in new:
+                what = path if k == "procedure" else "express overruling"
+                tally[(what, before[k], dims[k]["final"])] = tally.get((what, before[k], dims[k]["final"]), 0) + 1
+                log(f"  {item.id} {item.title[:50]}: {k} {before[k]} -> {dims[k]['final']} ({what})")
+            hits.append((Jsonb(dims), raw, conf, item.id, analysis_id))
+        if hits and not dry_run:
             with db.connect() as c:
                 for h in hits:
                     c.execute("UPDATE score SET dimensions = %s, raw = %s, confidence = %s"
                               " WHERE artifact_id = %s AND analysis_id = %s", h)
                 c.commit()
-            added += len(hits)
+        added += len(hits)
+    for (what, old, new), n in sorted(tally.items(), key=str):
+        log(f"  tally: {what}: {old} -> {new}: {n}")
     return added

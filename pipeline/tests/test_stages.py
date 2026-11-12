@@ -291,6 +291,49 @@ def test_adverbs_and_commas_inside_an_express_overruling():
         assert data.express_overrulings(s) == [], s
 
 
+def test_ruling_path_from_caption_and_opening():
+    from itn.analyze import data
+    cap = "OCTOBER TERM, 2019 423\nREPUBLICAN NATIONAL COMMITTEE et al. v.\nDEMOCRATIC NATIONAL COMMITTEE et al.\n"
+    assert data.ruling_path(cap + "on application for stay\nNo. 19A1016. Decided April 6, 2020\n", "Per Curiam.\nx") == "emergency_unargued"
+    assert data.ruling_path("NFIB v. OSHA\non applications for stays\nNo. 21A244. Argued January 7, 2022—Decided January 13, 2022",
+                            "Per Curiam.\nx") == "emergency_argued"
+    assert data.ruling_path("", "OCTOBER TERM, 2019 345\non petition for writ of certiorari to the united\nstates court of "
+                            "appeals\nNo. 19–5421. Decided March 23, 2020\nPer Curiam.\n") == "summary_disposition"
+    assert data.ruling_path(None, "Per Curiam.\nRespondent was convicted. " + "x " * 900 +
+                            "The petition for a writ of certiorari and the motion for leave to proceed in forma pauperis "
+                            "are granted. The judgment is reversed.") == "summary_disposition"
+    assert data.ruling_path(None, "Per Curiam.\nWe granted certiorari to decide two questions. " + "x " * 400 +
+                            "The writ of certiorari is dismissed as improvidently granted.") == "dismissed_improvidently"
+    assert data.ruling_path(None, "Chief Justice Rehnquist, Circuit Justice.\nThis case is before me on an application "
+                            "for injunctive relief.") == "in_chambers"
+    # Ordinary argued cases, including ones whose syllabus mentions an application or a stay.
+    assert data.ruling_path("MORGAN v. SUNDANCE, INC.\ncertiorari to the united states court of appeals\nNo. 21–328. "
+                            "Argued March 21, 2022—Decided May 23, 2022\nSundance moved to stay the litigation; an "
+                            "application for a stay under § 3 was denied.", "Justice Kagan delivered the opinion.") is None
+    assert data.ruling_path(None, "Justice Breyer delivered the opinion of the Court. After the application for a stay "
+                            "was denied, the petition for a writ of certiorari is granted in a related case.") is None
+    assert data.ruling_path(None, "Per Curiam.\nOn December 8, 2000, the Supreme Court of Florida ordered a recount. "
+                            "We granted the application, treated it as a petition for a writ of certiorari, and granted "
+                            "certiorari.") is None
+
+
+def test_procedure_rule_sets_rating_both_ways():
+    from itn.analyze.stages import apply_rules, overall
+    case = Item(id="scotus/589-us-423", type="scotus_case", subtype=None, title="RNC v. DNC",
+                effective_date=dt.date(2020, 4, 6), summary="", metadata={})
+    names = RUBRIC["types"]["scotus_case"]["dimensions"]
+    for start, kind, want in ((1, "summary_disposition", 2), (4, "summary_disposition", 2), (4, "emergency_unargued", 1),
+                              (1, "in_chambers", 3)):
+        dims = {k: {"rating": 3, "rating_independent": 3, "final": 3, "evidence": ["x"], "reason": "r"} for k in names}
+        dims["procedure"]["final"] = start
+        out, raw, _ = apply_rules(RUBRIC, case, dims, 0.7, 1.0, {"ruling_path": {"kind": kind, "description": "d"}})
+        assert out["procedure"]["final"] == want and out["procedure"]["rule"] == "ruling_procedure"
+        assert raw == pytest.approx(overall([3] * (len(names) - 1) + [want], 1))
+    dims = {k: {"rating": 3, "rating_independent": 3, "final": 3, "evidence": ["x"], "reason": "r"} for k in names}
+    same, raw, _ = apply_rules(RUBRIC, case, dict(dims), 0.75, 1.0, {"expressly_overrules": False})
+    assert same == dims and raw == 0.75
+
+
 def test_overruled_exceptions_are_not_precedent():
     from itn.analyze import data
     assert data.express_overrulings("For the reasons we discuss, Alaska's exceptions are overruled. "
