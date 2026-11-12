@@ -19,6 +19,10 @@ on:
         description: "Only artifacts without a current score"
         type: boolean
         default: true
+      unreviewed:
+        description: "Only items whose current score is the economy model's own (re-score after a wording change)"
+        type: boolean
+        default: false
       budget:
         description: "Hard spending cap in USD"
         required: true
@@ -83,6 +87,7 @@ jobs:
           [ -n "$TYPE" ] && args+=(--type "$TYPE")
           [ -n "$YEARS" ] && args+=(--years "$YEARS")
           [ "${{ inputs.unscored }}" = "true" ] && args+=(--unscored)
+          [ "${{ inputs.unreviewed }}" = "true" ] && args+=(--unreviewed)
           [ "${{ inputs.dry_run }}" = "true" ] && args+=(--dry-run)
           [ "${{ inputs.pilot }}" = "true" ] && args+=(--pilot)
           [ "${{ inputs.compare }}" = "true" ] && args+=(--compare)

@@ -315,3 +315,50 @@ def apply_new_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> int:
     for (what, old, new), n in sorted(tally.items(), key=str):
         log(f"  tally: {what}: {old} -> {new}: {n}")
     return added
+
+
+def tally_agreement(rows) -> list[str]:
+    """rows: (type, reviewed dims, trial output dims, earlier output dims or None). Counts,
+    per type and dimension, how often the model's rating equals the reviewer's, before
+    (earlier) and after (trial), leaving out pairs where either side is insufficient."""
+    t: dict = {}
+    for typ, reviewed, trial, earlier in rows:
+        for k, d in (reviewed or {}).items():
+            want = (d or {}).get("rating")
+            if want is None or want < 0:
+                continue
+            for label, out in (("before", earlier), ("after", trial)):
+                got = ((out or {}).get(k) or {}).get("rating")
+                if got is None or got < 0:
+                    continue
+                c = t.setdefault((typ, k), {}).setdefault(label, [0, 0, 0, 0])
+                c[0] += 1
+                c[1] += got == want
+                c[2] += abs(got - want) <= 1
+                c[3] += got - want
+    lines = []
+    for (typ, k), v in sorted(t.items()):
+        parts = [f"{label} {c[1]}/{c[0]} exact, {c[2]} within one, mean {c[3] / c[0]:+.2f}"
+                 for label, c in sorted(v.items(), reverse=True)]
+        lines.append(f"  {typ} {k}: " + "; ".join(parts))
+    for label in ("before", "after"):
+        n = sum(v[label][0] for v in t.values() if label in v)
+        if n:
+            lines.append(f"  all {label}: {sum(v[label][1] for v in t.values() if label in v)}/{n} exact,"
+                         f" {sum(v[label][2] for v in t.values() if label in v)} within one")
+    return lines
+
+
+def agreement(conn, rubric: dict) -> list[str]:
+    """Free: for reviewed items that a trial (--compare) economy run also assessed, how the
+    trial's first-pass ratings and the earlier first-pass ratings compare with the review."""
+    rv = f"{rubric['version']}-economy"
+    first = ("(SELECT output->'dimensions' FROM analysis WHERE kind = 'type_assessment'"
+             " AND subject_id = s.artifact_id AND rubric_version = %s ORDER BY id DESC LIMIT 1)")
+    rows = conn.execute(
+        f"SELECT a.type, s.dimensions, {first}, {first} FROM score s"
+        " JOIN analysis an ON an.id = s.analysis_id JOIN artifact a ON a.id = s.artifact_id"
+        " WHERE s.current AND an.rubric_version = %s ORDER BY s.artifact_id",
+        (rv + "-compare", rv, rv + REVIEW_SUFFIX)).fetchall()
+    rows = [r for r in rows if r[2]]
+    return [f"{len(rows)} reviewed items also assessed by a trial run"] + tally_agreement(rows)

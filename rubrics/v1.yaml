@@ -2,6 +2,9 @@
 # Changing anything here means bumping `version`; cached analyses keyed to the old
 # version are then re-run only for the stages that use the changed part.
 version: 1
+# 2026-11-12: the reach, scope and conflict questions were made more specific after a
+# 102-item review found the first pass one step off on them. The version stays 1: the
+# cache is keyed on the prompt text, so only assessments of the changed types re-run.
 
 scale:
   4: {band: routine, meaning: "Squarely follows settled practice; many close analogs"}
@@ -80,23 +83,23 @@ types:
       text: "How closely does the holding track the constitutional or statutory text it construes?"
       method: "Does the Court apply its interpretive tests the way its recent cases did?"
       procedure: "Is the path ordinary (not emergency docket, cert before judgment, a question not presented, issues reached sua sponte)?"
-      reach: "How much settled law changes: how many earlier cases or statutes are undermined?"
+      reach: "How much settled law changes: how many earlier cases or statutes are undermined? Deciding an open question or a circuit split on one provision, with none of the Court's own cases undermined, is ordinary (3). Rate 2 or lower only when the holding narrows or unsettles the Court's own cases, or changes the rule for a whole field or a class of statutes."
   executive_document:
     presort: routine_templates         # see itn.analyze.presort; no model call
     analog_window_start: "2000-01-01"  # older actions the document cites are extra evidence
     dimensions:
       authority: "Does the statute or constitutional power it cites, read as of that day, support it?"
       analogs: "How many earlier actions by any president did the same kind of thing?"
-      scope: "How large is its effect compared with those analogs?"
+      scope: "How large is its effect compared with those analogs? An action of the usual size for its kind is ordinary (3), or routine (4) when it is a standard recurring step. Rate 2 or lower only when the material shows it reaches clearly further than the analogs: more people, money, agencies or territory."
       procedure: "Does it use ordinary channels (not emergency powers, bypassed notice and comment, an overridden statutory process)?"
-      conflict: "Does it conflict with a statute or a court order in force that day?"
+      conflict: "Does it conflict with a statute or a court order in force that day? When the material shows no statute or order it contradicts, rate 3: absence from the material is not proof. Rate 4 only when the material shows it carries out a statute or a court order. Rate -1 only when the material raises a possible conflict it cannot settle."
   public_law:
     shown_not_scored: [party_line_vote]
     dimensions:
       # Vehicles are judged by how common they were at the time (Patrick decided 2026-11-07).
       process: "Did it pass the way laws of its kind usually passed at the time? Reconciliation, omnibus or continuing-resolution vehicles are a departure only to the extent the facts show they were rare then; skipped committees or unusually fast passage count against it."
       footing: "Is the constitutional power it relies on well supported by the Court's cases as of that day?"
-      scope: "How much of the U.S. Code does it change, compared with other laws? Use the size percentile in the facts: large laws are common, so size alone is at most unusual."
+      scope: "How much of the U.S. Code does it change, compared with other laws? Use the size percentile in the facts: large laws are common, so size alone is at most unusual. A law that amends or adds sections within one program or subject is ordinary (3) however many sections it touches. Rate 2 only when it is above about the 80th size percentile and spans several subjects, or rewrites a whole system."
       analogs: "Have earlier laws done the same thing in the same area?"
 
 models:
