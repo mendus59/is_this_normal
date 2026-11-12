@@ -578,7 +578,8 @@ def apply_rules(rubric: dict, item, dims: dict, raw, conf, facts: dict):
     names its evidence. A ruling whose controlling opinion expressly overrules one of the
     Court's cases gets the rubric's rating on precedent (only ever lowering it). A ruling
     that came by emergency application, summary disposition, dismissal or in chambers gets
-    the rubric's rating for that path on procedure, up or down."""
+    the rubric's rating for that path on procedure, up or down. A law whose vote record shows
+    an uncontested or a narrow passage gets the rubric's rating for that path on process."""
     rules = rubric.get("rules") or {}
     rating = rules.get("express_overruling_precedent")
     passages = (facts or {}).get("expressly_overrules")
@@ -601,6 +602,20 @@ def apply_rules(rubric: dict, item, dims: dict, raw, conf, facts: dict):
                                  "evidence": sorted(set(d.get("evidence") or []) | {item.id}),
                                  "reason": f"Rule: this was {path['description']}.",
                                  "rule": "ruling_procedure", "same_actor_cap": False}
+            valid = [x["final"] for x in dims.values() if x["final"] >= 0]
+            raw = overall(valid, cap_of(rubric))
+            conf = max(conf, len(valid) / len(dims))
+    path = (facts or {}).get("passage_path") or {}
+    rating = (rules.get("law_process") or {}).get(path.get("kind"))
+    if item.type == "public_law" and rating is not None and "process" in dims:
+        d = dims["process"]
+        # Raise a plain "ordinary" (or missing) rating on an uncontested path; lower anything
+        # above the rule on a narrow vote. A model rating below these stands: it saw more.
+        if d["final"] < 0 or (d["final"] == 3 and rating > 3) or (rating < 3 and d["final"] > rating):
+            dims["process"] = {**d, "rating": rating, "rating_independent": rating, "final": rating,
+                               "evidence": sorted(set(d.get("evidence") or []) | {item.id}),
+                               "reason": f"Rule: it {path['description']}.",
+                               "rule": "law_process", "same_actor_cap": False}
             valid = [x["final"] for x in dims.values() if x["final"] >= 0]
             raw = overall(valid, cap_of(rubric))
             conf = max(conf, len(valid) / len(dims))

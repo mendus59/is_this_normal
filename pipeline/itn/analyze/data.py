@@ -234,6 +234,33 @@ def _after_per_curiam(body: str) -> str:
     return body[m.end():m.end() + OPENING_CHARS] if m else ""
 
 
+# How a law passed is in its vote record, so a rule (rubric `rules.law_process`) settles the
+# clear cases: no recorded vote, every recorded vote near-unanimous, or a narrow final vote.
+# Anything between is left to the model, which also sees the vehicle and the summary.
+PASSAGES = {
+    "voice": "passed without a recorded vote (voice vote or unanimous consent), the usual path for uncontested bills",
+    "near_unanimous": "passed with at most one in ten voting no on every recorded vote",
+    "narrow": "passed with under 55 percent in favor on a chamber's last recorded vote",
+}
+
+
+def passage_path(votes: list[dict]) -> str | None:
+    """The clear cases of how a law passed, from its recorded votes on or before the as-of
+    date. Only each chamber's last vote counts: an earlier version's vote is not final."""
+    last: dict = {}
+    for v in sorted(votes, key=lambda v: v.get("date") or ""):
+        if (v.get("yeas") or 0) + (v.get("nays") or 0) > 0:
+            last[v.get("chamber")] = v
+    if not last:
+        return None if votes else "voice"
+    share = [v["yeas"] / (v["yeas"] + (v.get("nays") or 0)) for v in last.values()]
+    if min(share) < 0.55:
+        return "narrow"
+    if min(share) >= 0.9:
+        return "near_unanimous"
+    return None
+
+
 def ruling_path(summary: str | None, text: str | None) -> str | None:
     """One of PATHS' keys, or None for an ordinary argued case (or when the text does not
     say). `summary` is the syllabus page, which carries the caption where the source has
@@ -339,6 +366,9 @@ def record_facts(conn, item: Item, text: str | None = None, cited: list[str] | N
             for v in votes]
     else:
         facts["final_passage_votes"] = "none recorded (passed by voice vote or unanimous consent)"
+    path = passage_path(votes)
+    if path:
+        facts["passage_path"] = {"kind": path, "description": PASSAGES[path]}
     # How large it is next to earlier substantive laws, by the length of the CRS summary.
     size = len(item.summary or "")
     if size:

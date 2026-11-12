@@ -53,6 +53,8 @@ combine:
 # one of the Court's cases ("Roe and Casey are overruled") is rated this on precedent.
 # ruling_procedure: how a ruling reached the Court and was disposed of, read from its caption
 # and opening, sets the procedure rating. Ordinary argued cases are left to the assessment.
+# law_process: how a law passed, read from its recorded votes. The uncontested paths raise an
+# "ordinary" process rating to this; a narrow vote lowers it to this. A lower model rating stands.
 rules:
   express_overruling_precedent: 0
   ruling_procedure:
@@ -61,6 +63,10 @@ rules:
     summary_disposition: 2      # decided on the petition, without merits briefing or argument
     dismissed_improvidently: 2  # certiorari granted, then dismissed
     in_chambers: 3              # a single Justice's ruling on an application
+  law_process:
+    voice: 4                    # no recorded vote: voice vote or unanimous consent
+    near_unanimous: 4           # at most one in ten voting no on every recorded vote
+    narrow: 2                   # under 55 percent in favor on a chamber's last recorded vote
 
 verification:
   second_pass_bands: [novel, unprecedented]

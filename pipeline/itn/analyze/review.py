@@ -107,7 +107,7 @@ def _facts(facts: dict, answer: dict | None = None) -> dict:
     reviewer read those sentences: a reviewed precedent rating above 0 means the reviewer
     judged that none of them is the Court overruling a precedent, and that judgment stands."""
     # The reviewer saw how the ruling reached the Court; the reviewed procedure rating stands.
-    facts = {k: v for k, v in facts.items() if k != "ruling_path"}
+    facts = {k: v for k, v in facts.items() if k not in ("ruling_path", "passage_path")}
     express = facts.get("expressly_overrules")
     if isinstance(express, list):
         kept = [s for s in express if data.express_overrulings(s)]
@@ -186,7 +186,7 @@ def import_answers(rubric: dict, packets: list[Path], answers: list[Path], revie
     return written
 
 
-RULES = {"precedent": "express_overruling", "procedure": "ruling_procedure"}
+RULES = {"precedent": "express_overruling", "procedure": "ruling_procedure", "process": "law_process"}
 
 
 def rescore_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> tuple[int, int]:
@@ -203,7 +203,8 @@ def rescore_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> tuple[i
             " JOIN analysis an ON an.id = s.analysis_id"
             " WHERE s.current AND an.rubric_version = %s"
             " AND (s.dimensions->'precedent'->>'rule' = 'express_overruling'"
-            "  OR s.dimensions->'procedure'->>'rule' = 'ruling_procedure') ORDER BY s.artifact_id", (rv,)).fetchall()
+            "  OR s.dimensions->'procedure'->>'rule' = 'ruling_procedure'"
+            "  OR s.dimensions->'process'->>'rule' = 'law_process') ORDER BY s.artifact_id", (rv,)).fetchall()
     log(f"{len(rows)} current scores have a rating set by a rule")
     pipe = Pipeline(r2, None, rubric, 0, "haiku", profile="economy", record_run=False)
     changed = kept = 0
@@ -247,7 +248,7 @@ def rescore_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> tuple[i
         log(f"  {min(start + CHUNK, len(rows))} of {len(rows)} checked")
     log(f"Rescored {changed}; {kept} still set by a rule")
     added = apply_new_rules(r2, rubric, log, dry_run)
-    log(f"{added} more rulings now have a rating set by a rule" + (" (dry run: nothing written)" if dry_run else ""))
+    log(f"{added} more rulings and laws now have a rating set by a rule" + (" (dry run: nothing written)" if dry_run else ""))
     return changed + added, kept
 
 
@@ -257,7 +258,7 @@ def _ruled(dims: dict) -> list[str]:
 
 def apply_new_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> int:
     """Free: the other direction of a rule change. Scan every unreviewed economy score of a
-    ruling for rules that fire on the stored opinion text but are not yet applied, and apply
+    ruling or law for rules that fire on the stored text or vote record but are not yet applied, and apply
     them to the stored dimensions. Reviewed scores are left alone: the reviewer read the
     material and that judgment stands."""
     if not rubric.get("rules"):
@@ -267,10 +268,12 @@ def apply_new_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> int:
         rows = c.execute(
             "SELECT s.artifact_id, s.analysis_id, s.dimensions, s.raw, s.confidence FROM score s"
             " JOIN analysis an ON an.id = s.analysis_id JOIN artifact a ON a.id = s.artifact_id"
-            " WHERE s.current AND an.rubric_version = %s AND a.type = 'scotus_case' AND a.in_scope"
-            " AND (s.dimensions->'precedent'->>'rule' IS NULL OR s.dimensions->'procedure'->>'rule' IS NULL)"
+            " WHERE s.current AND an.rubric_version = %s AND a.in_scope"
+            " AND ((a.type = 'scotus_case' AND (s.dimensions->'precedent'->>'rule' IS NULL"
+            "       OR s.dimensions->'procedure'->>'rule' IS NULL))"
+            "  OR (a.type = 'public_law' AND s.dimensions->'process'->>'rule' IS NULL))"
             " ORDER BY s.artifact_id", (rv,)).fetchall()
-    log(f"{len(rows)} unreviewed rulings checked for rules that now fire")
+    log(f"{len(rows)} unreviewed rulings and laws checked for rules that now fire")
     added, tally = 0, {}
     for start in range(0, len(rows), CHUNK):
         part = rows[start:start + CHUNK]
@@ -281,11 +284,16 @@ def apply_new_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> int:
             item = items.get(artifact_id)
             if item is None:
                 continue
-            text = data.text_of(r2, item.text_keys, data.TEXT_MAX_CHARS)
-            facts = {"expressly_overrules": data.express_overrulings(text)[:3] or False}
-            path = data.ruling_path(item.summary, text)
-            if path:
-                facts["ruling_path"] = {"kind": path, "description": data.PATHS[path]}
+            if item.type == "public_law":
+                path = data.passage_path([v for v in (item.metadata.get("votes") or [])
+                                          if (v.get("date") or "") <= item.as_of.isoformat()])
+                facts = {"passage_path": {"kind": path, "description": data.PASSAGES[path]}} if path else {}
+            else:
+                text = data.text_of(r2, item.text_keys, data.TEXT_MAX_CHARS)
+                facts = {"expressly_overrules": data.express_overrulings(text)[:3] or False}
+                path = data.ruling_path(item.summary, text)
+                if path:
+                    facts["ruling_path"] = {"kind": path, "description": data.PATHS[path]}
             before = {k: (dims.get(k) or {}).get("final") for k in RULES}
             was = _ruled(dims)
             dims, raw, conf = apply_rules(rubric, item, dims, raw, conf, facts)
@@ -293,7 +301,7 @@ def apply_new_rules(r2, rubric: dict, log=print, dry_run: bool = False) -> int:
             if not new:
                 continue
             for k in new:
-                what = path if k == "procedure" else "express overruling"
+                what = "express overruling" if k == "precedent" else path
                 tally[(what, before[k], dims[k]["final"])] = tally.get((what, before[k], dims[k]["final"]), 0) + 1
                 log(f"  {item.id} {item.title[:50]}: {k} {before[k]} -> {dims[k]['final']} ({what})")
             hits.append((Jsonb(dims), raw, conf, item.id, analysis_id))

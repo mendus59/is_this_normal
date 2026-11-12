@@ -382,3 +382,30 @@ def test_express_overruling_rule_sets_precedent():
     assert raw < 0.40   # with the worst-plus-one cap: novel at most
     same, raw2, _ = apply_rules(RUBRIC, case, dict(dims), 0.75, 1.0, {"expressly_overrules": False})
     assert raw2 == 0.75
+
+
+def test_passage_path_from_votes():
+    from itn.analyze import data
+    v = lambda ch, d, y, n: {"chamber": ch, "date": d, "yeas": y, "nays": n}
+    assert data.passage_path([]) == "voice"
+    assert data.passage_path([v("House", "2017-05-23", 418, 0)]) == "near_unanimous"
+    assert data.passage_path([v("House", "2025-04-09", 217, 211), v("Senate", "2025-03-27", 52, 48)]) == "narrow"
+    assert data.passage_path([v("House", "2015-05-21", 284, 133)]) is None
+    # Only each chamber's last vote counts: an earlier version passed by one vote.
+    assert data.passage_path([v("House", "2021-05-20", 213, 212), v("House", "2021-07-29", 416, 11),
+                              v("Senate", "2021-07-29", 98, 0)]) == "near_unanimous"
+
+
+def test_law_process_rule_raises_ordinary_and_lowers_on_narrow_votes():
+    from itn.analyze.stages import apply_rules
+    law = Item(id="pl/115-55", type="public_law", subtype=None, title="An act",
+               effective_date=dt.date(2017, 8, 23), summary="", metadata={})
+    names = RUBRIC["types"]["public_law"]["dimensions"]
+    for start, kind, want, ruled in ((3, "voice", 4, True), (3, "near_unanimous", 4, True), (2, "voice", 2, False),
+                                     (4, "narrow", 2, True), (3, "narrow", 2, True), (1, "narrow", 1, False),
+                                     (-1, "voice", 4, True)):
+        dims = {k: {"rating": 3, "rating_independent": 3, "final": 3, "evidence": ["x"], "reason": "r"} for k in names}
+        dims["process"]["final"] = start
+        out, _, _ = apply_rules(RUBRIC, law, dims, 0.7, 1.0, {"passage_path": {"kind": kind, "description": "d"}})
+        assert out["process"]["final"] == want
+        assert (out["process"].get("rule") == "law_process") == ruled
