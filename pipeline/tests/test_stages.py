@@ -271,6 +271,8 @@ def test_conditions_history_and_quotes_are_not_express():
     for s in ("Insofar as it held that a defective indictment deprives a court of jurisdiction, Bain is overruled.",
               "To the extent that Meek and Wolman conflict with this holding, we overrule them.",
               "If anything more is left of Humphrey's, we overrule it.",
+              "Accordingly, we reject Bowles' reliance on the doctrine, and we overrule Harris Truck Lines and "
+              "Thompson to the extent they purport to authorize an exception to a jurisdictional rule.",
               "We hold that Roe and Casey must be overruled."):
         assert data.express_overrulings(s) == [s], s
 
@@ -279,6 +281,8 @@ def test_overruled_exceptions_are_not_precedent():
     from itn.analyze import data
     assert data.express_overrulings("For the reasons we discuss, Alaska's exceptions are overruled. "
                                     "We overrule Alaska's exception.") == []
+    assert data.express_overrulings("Alaska's exception to the Special Master's recommendation on count I of the "
+                                    "Amended Complaint is overruled.") == []
 
 
 def test_statute_history_counts_other_presidents():

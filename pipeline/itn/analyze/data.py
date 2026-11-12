@@ -176,11 +176,15 @@ _NEGATED = re.compile(r"\b(?:not|no|decline[sd]?|need not|should not|would not|c
                       r"|whether|would|until|unless|argu(?:e[sd]?|ing)|urg(?:e[sd]?|ing)|contend(?:s|ed)?"
                       r"|ask(?:s|ed)?)\b[^.]{0,60}$|\bif\b[^.,]{0,60}$", re.IGNORECASE)
 # Overruling a party's exception, objection or motion is a ruling in the case, not on precedent
-# ("Alaska's exceptions are overruled" in an original-jurisdiction case). A sentence about what
-# the dissent's approach would require, a question, or a quotation of another court is not the
-# Court overruling either.
-_NOT_PRECEDENT = re.compile(r"\b(?:exceptions?|objections?|demurrers?|motions?|dissent(?:'s|s|ing)?)\b"
-                            r"|overrule[^.]{0,60}\?|[“\"][^”\"]{0,200}\boverruled?\b", re.IGNORECASE)
+# ("Alaska's exceptions are overruled", "we overrule Kansas' exception"). The word must be what
+# is overruled: "we overrule Harris Truck Lines ... to the extent they purport to authorize an
+# exception" still counts. A sentence about what the dissent's approach would require, a
+# question, or a quotation of another court is not the Court overruling either.
+_NOT_PRECEDENT = re.compile(r"\b(?:exceptions?|objections?|demurrers?|motions?)\b[^.]{0,120}\b(?:is|are)\s+"
+                            r"(?:hereby\s+|now\s+|accordingly\s+|therefore\s+|thus\s+)?overruled\b"
+                            r"|\boverrule\b[^.]{0,40}\b(?:exceptions?|objections?|demurrers?|motions?)\b"
+                            r"|\bdissent(?:'s|s|ing)?\b|overrule[^.]{0,60}\?|[“\"][^”\"]{0,200}\boverruled?\b",
+                            re.IGNORECASE)
 
 # Statutes that give the President emergency or extraordinary powers. Invoking one is a
 # fact the procedure dimension weighs; it is not by itself a departure.

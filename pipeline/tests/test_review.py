@@ -76,3 +76,35 @@ def test_review_pipeline_logs_no_run(monkeypatch):
     monkeypatch.setattr(stages.db, "connect", lambda: (_ for _ in ()).throw(AssertionError("no db")))
     p = stages.Pipeline(None, None, RUBRIC, 0, "haiku", profile="economy", record_run=False)
     assert p.run_id is None
+
+
+def test_rescore_rebuilds_score_when_rule_no_longer_fires(monkeypatch):
+    case = Item(id="scotus/545-us-75", type="scotus_case", subtype=None, title="Alaska v. United States",
+                effective_date=dt.date(2005, 6, 6), summary="", metadata={})
+    sdims = RUBRIC["types"]["scotus_case"]["dimensions"]
+    out = {"dimensions": {k: {"rating": 3, "rating_independent": 3, "evidence": [case.id], "reason": "r"} for k in sdims}}
+    updates = []
+
+    class C(Conn):
+        def execute(self, q, p=()):
+            if q.startswith("SELECT s.artifact_id"):
+                return NS(fetchall=lambda: [(case.id, 5, "type_assessment"), ("scotus/1-us-1", 6, "type_assessment")])
+            if q.startswith("SELECT output FROM analysis WHERE id"):
+                return NS(fetchone=lambda: (out,))
+            if q.startswith("UPDATE score"):
+                updates.append(p)
+            return NS(fetchone=lambda: None, fetchall=lambda: [])
+
+    other = Item(id="scotus/1-us-1", type="scotus_case", subtype=None, title="X", effective_date=dt.date(2005, 6, 6),
+                 summary="", metadata={})
+    monkeypatch.setattr(review.db, "connect", lambda: contextlib.nullcontext(C()))
+    monkeypatch.setattr(data, "load_items", lambda c, ids: [case, other])
+    monkeypatch.setattr(data, "same_actor_finals", lambda c, i, ids: {})
+    monkeypatch.setattr(stages.Pipeline, "economy_inputs", lambda self, items: {
+        "facts": {case.id: {"expressly_overrules": False}, other.id: {"expressly_overrules": ["X is overruled."]}},
+        "allowed": {case.id: {case.id}, other.id: {other.id}}})
+    changed, kept = review.rescore_rules(None, RUBRIC, log=lambda m: None)
+    assert (changed, kept) == (1, 1)
+    dims, raw, conf, artifact, analysis_id = updates[0]
+    assert artifact == case.id and analysis_id == 5 and raw == 0.75
+    assert "rule" not in dims.obj["precedent"]
