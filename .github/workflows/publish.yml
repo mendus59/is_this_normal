@@ -30,5 +30,6 @@ jobs:
           cache: pip
           cache-dependency-path: pipeline/pyproject.toml
       - run: pip install ./pipeline
+      - run: itn migrate
       - run: itn publish
       - run: itn status

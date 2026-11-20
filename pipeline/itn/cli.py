@@ -249,8 +249,44 @@ def _dry_run(args) -> None:
           " 2026-10-06; token counts are approximate.")
 
 
+def _citation_scope(conn, args) -> list[str]:
+    from itn.analyze import citation_use as cu
+    if args.pilot:  # the calibration anchors that have citations to check
+        from itn.analyze import estimate as est
+        from itn.analyze.rubric import load_anchors
+        args.ids = [aid for typ, entries in load_anchors().items() if typ in cu.TYPES and isinstance(entries, list)
+                    for a in entries if (aid := est.resolve_anchor(conn, typ, a))]
+    return cu.scope_ids(conn, ids=args.ids, types=[args.type] if args.type else None, years=args.years,
+                        unchecked=args.unchecked, sample=args.sample)
+
+
+def _dry_run_citations(args) -> None:
+    """Free: what checking every citation in scope would cost. Counts only, no text reads."""
+    from itn.analyze import citation_use as cu
+    from itn.analyze.rubric import load_rubric
+
+    rubric = load_rubric()
+    second = (rubric.get("citation_use") or {}).get("confirm_tier") or "haiku"
+    run = rubric.get("run", {})
+    flags = {"batch": bool(run.get("batch")), "caching": bool(run.get("prompt_caching"))}
+    with db.connect() as conn:
+        ids = _citation_scope(conn, args)
+        rows = []
+        for k in range(0, len(ids), 500):
+            rows += cu.counts(conn, ids[k:k + 500])
+    out = cu.report(f"Citation checks: {len(ids)} items (Haiku, second check on {second},"
+                    f" {', '.join(k for k, v in flags.items() if v) or 'standard'})",
+                    cu.estimate(rows, "haiku", second, **flags))
+    out += [f"  with the second check on Sonnet: ${cu.estimate(rows, 'haiku', 'sonnet', **flags)['usd']:,.2f}",
+            f"  everything on Sonnet: ${cu.estimate(rows, 'sonnet', 'sonnet', **flags)['usd']:,.2f}"]
+    print("\n".join(out))
+    print("\nDry run: no model was called and nothing was spent.")
+
+
 def cmd_analyze(args) -> None:
     """Paid analysis. Only the `paid` GitHub environment has the API key."""
+    if args.citations:
+        return _analyze_citations(args)
     scope = {"ids": args.ids, "type": args.type, "years": args.years, "unscored": args.unscored,
              "unreviewed": args.unreviewed, "pilot": args.pilot, "sample": args.sample, "compare": args.compare, "profile": args.profile}
     print(f"Scope: {scope}  budget: ${args.budget:.2f}  max tier: {args.max_tier}  dry run: {args.dry_run}")
@@ -282,6 +318,34 @@ def cmd_analyze(args) -> None:
                         compare=args.compare, dispatched_by=os.environ.get("GITHUB_ACTOR"), scope=scope,
                         log=lambda m: print(m, flush=True), profile=args.profile)
     pipeline.score(ids)
+
+
+def _analyze_citations(args) -> None:
+    scope = {"task": "citations", "ids": args.ids, "type": args.type, "years": args.years,
+             "unchecked": args.unchecked, "sample": args.sample, "compare": args.compare}
+    print(f"Scope: {scope}  budget: ${args.budget:.2f}  dry run: {args.dry_run}")
+    if args.dry_run:
+        _dry_run_citations(args)
+        return
+    if args.budget <= 0:
+        sys.exit("A paid run needs --budget greater than 0.")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.exit("ANTHROPIC_API_KEY is not set. Paid runs only work in the `paid` environment.")
+    import anthropic
+
+    from itn.analyze.rubric import load_rubric
+    from itn.analyze.stages import Pipeline
+    from itn.storage import R2
+
+    with db.connect() as conn:
+        ids = _citation_scope(conn, args)
+    if not ids:
+        sys.exit("Nothing in scope.")
+    print(f"Checking the citations of {len(ids)} items", flush=True)
+    pipeline = Pipeline(R2(), anthropic.Anthropic(), load_rubric(), args.budget, args.max_tier,
+                        compare=args.compare, dispatched_by=os.environ.get("GITHUB_ACTOR"), scope=scope,
+                        log=lambda m: print(m, flush=True), profile=args.profile)
+    pipeline.check_citations(ids)
 
 
 def cmd_calibration(args) -> None:
@@ -414,6 +478,10 @@ def main(argv=None) -> None:
                     help="trial run: standard profile uses compare_stages; results never become current scores")
     an.add_argument("--profile", choices=["standard", "economy"], default="standard",
                     help="economy: one Haiku pass per item from free material (rubric `economy:`)")
+    an.add_argument("--citations", action="store_true",
+                    help="judge how each citation is used (appropriate, stretch, improper) instead of scoring")
+    an.add_argument("--unchecked", action="store_true",
+                    help="--citations: only items with citations not judged yet")
     an.add_argument("--sample", type=int, default=0,
                     help="dry run: also estimate every in-scope item from a random sample of this many per type")
     an.set_defaults(fn=cmd_analyze)
