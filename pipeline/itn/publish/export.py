@@ -81,7 +81,7 @@ def build_details(conn) -> dict[str, dict]:
         arts[aid] = {"id": aid, "type": typ, "subtype": subtype, "title": title,
                      "date": date.isoformat() if date else None, "in_scope": in_scope,
                      "summary": summary, "sources": sources, "text": text_key,
-                     "opinions": [], "cites": [], "cited_by": []}
+                     "opinions": [], "cites": [], "cited_by": [], "citation_use": {}}
     for (cid, aid, kind, author, joined, text_key) in conn.execute(
             "SELECT id, artifact_id, kind, author, joined_by, text_key FROM component"
             " ORDER BY artifact_id, ord"):
@@ -90,13 +90,19 @@ def build_details(conn) -> dict[str, dict]:
                                           "joined_by": joined, "text": text_key})
     titles = dict(conn.execute("SELECT id, title FROM artifact").fetchall())
     seen = set()
-    for (from_comp, from_art, to, pin, raw) in conn.execute(
-            "SELECT c.from_component, f.artifact_id, c.to_artifact, c.pinpoint, c.raw_text"
+    for (from_comp, from_art, to, pin, raw, verdict, reason) in conn.execute(
+            "SELECT c.from_component, f.artifact_id, c.to_artifact, c.pinpoint, c.raw_text, u.verdict, u.reason"
             " FROM citation c JOIN component f ON f.id = c.from_component"
+            " LEFT JOIN citation_use u ON u.citation_id = c.id"
             " ORDER BY f.artifact_id, f.ord, c.id"):
         if from_art in arts:
-            arts[from_art]["cites"].append({"from": from_comp, "to": to, "pin": pin, "raw": raw,
-                                            "title": titles.get(to)})
+            cite = {"from": from_comp, "to": to, "pin": pin, "raw": raw, "title": titles.get(to)}
+            if verdict:
+                # How the citation is used (appropriate, stretch, improper, insufficient) and why.
+                cite.update(use=verdict, why=reason)
+                tally = arts[from_art]["citation_use"]
+                tally[verdict] = tally.get(verdict, 0) + 1
+            arts[from_art]["cites"].append(cite)
         if to in arts and (to, from_art) not in seen and len(arts[to]["cited_by"]) < MAX_CITED_BY:
             seen.add((to, from_art))
             arts[to]["cited_by"].append({"id": from_art, "title": titles.get(from_art)})

@@ -11,6 +11,10 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     <p id="d-scope" class="note" hidden>Cited by the corpus. It is here to be read, not scored.</p>
     <p id="d-usc" class="note" hidden>This is the latest annual edition of the U.S. Code. The text in force when a ruling or law cited it may have been different.</p>
     <p id="d-sources" class="sources"></p>
+    <section id="d-use" class="use-summary" hidden>
+      <p><b>How its citations are used.</b> <span class="tally"></span></p>
+      <p class="legend">Each checked citation is marked in the text: <span class="cu-badge v-appropriate">Appropriate</span> the cited authority supports it; <span class="cu-badge v-stretch">Stretch</span> not technically wrong, but beyond what the authority held; <span class="cu-badge v-improper">Improper</span> the authority does not say this (two independent checks agreed). Select a mark for the reason. <a id="m-link" href="#">How citations are checked</a></p>
+    </section>
     <section id="d-summary" hidden><h2>Summary</h2><p class="summary"></p></section>
     <section id="d-opinions" hidden>
       <h2>Opinions</h2>
@@ -36,18 +40,86 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     opinion: "Opinion", other: "Opinion" };
   const readerUrl = (id) => `${base}/read/?id=${encodeURIComponent(id)}`;
   const textCache = new Map();
+  const USE = { appropriate: "Appropriate", stretch: "Stretch", improper: "Improper", insufficient: "Not enough to judge" };
+  const ORDER = ["improper", "stretch", "appropriate", "insufficient"];
 
   async function text(key) {
     if (!textCache.has(key)) textCache.set(key, fetch(`${dataBase}/${key}`).then((r) => (r.ok ? r.text() : "")));
     return textCache.get(key);
   }
 
-  function paragraphs(el, body) {
-    el.replaceChildren(...body.split(/\n{2,}|\n(?=\s{2,})/).filter((p) => p.trim()).map((p) => {
+  function paragraphs(el, body, cites = []) {
+    const texts = body.split(/\n{2,}|\n(?=\s{2,})/).filter((p) => p.trim()).map((p) => p.replace(/\s*\n\s*/g, " ").trim());
+    const marks = placeMarks(texts, cites);
+    el.replaceChildren(...texts.map((t, i) => {
       const para = document.createElement("p");
-      para.textContent = p.replace(/\s*\n\s*/g, " ").trim();
+      let at = 0;
+      for (const m of marks[i]) {
+        para.append(t.slice(at, m.start));
+        const cite = document.createElement("span");
+        cite.className = `cu-cite v-${m.c.use}`;
+        cite.textContent = t.slice(m.start, m.end);
+        para.append(cite, " ", badge(m.c));
+        at = m.end;
+      }
+      para.append(t.slice(at));
       return para;
     }));
+  }
+
+  // Each checked citation goes on the first unused place its text appears, preferring one
+  // followed by its pinpoint page (the same rule the pipeline used to find its passage).
+  function placeMarks(texts, cites) {
+    const marks = texts.map(() => []);
+    const used = new Set();
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const c of cites) {
+      if (!c.use || !c.raw?.trim()) continue;
+      const re = new RegExp(c.raw.trim().split(/\s+/).map(esc).join("\\s+"), "g");
+      const pin = c.pin ? new RegExp("^[^A-Za-z]{0,12}?(?:at\\s+)?" + esc(String(c.pin).replace(/^[, ]+|[, ]+$/g, "")) + "\\b") : null;
+      let first = null, best = null;
+      for (let i = 0; i < texts.length && !best; i++) {
+        for (const m of texts[i].matchAll(re)) {
+          const key = `${i}:${m.index}`;
+          if (used.has(key)) continue;
+          const spot = { i, start: m.index, end: m.index + m[0].length, key, c };
+          first ??= spot;
+          if (!pin || pin.test(texts[i].slice(spot.end, spot.end + 40))) { best = spot; break; }
+        }
+      }
+      const spot = best ?? first;
+      if (!spot) continue;
+      used.add(spot.key);
+      // Underline through the pinpoint page and a closing "(1973)", so the mark follows the whole cite.
+      const tail = texts[spot.i].slice(spot.end, spot.end + 80);
+      const more = (best && pin ? (tail.match(pin)?.[0] ?? "") : "");
+      const year = tail.slice(more.length).match(/^[\d\-–, n.]*\s*\([^()]{0,60}?\d{4}\)/)?.[0] ?? "";
+      spot.end += more.length + year.length;
+      marks[spot.i].push(spot);
+    }
+    marks.forEach((m) => m.sort((a, b) => a.start - b.start));
+    // Overlapping citations (one inside another) keep only the first.
+    return marks.map((m) => m.filter((x, k) => !k || x.start >= m[k - 1].end));
+  }
+
+  function badge(c) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `cu-badge v-${c.use}`;
+    b.textContent = USE[c.use] ?? c.use;
+    b.setAttribute("aria-expanded", "false");
+    const why = document.createElement("span");
+    why.className = "cu-why";
+    why.hidden = true;
+    why.textContent = c.why || "No reason recorded.";
+    b.addEventListener("click", () => {
+      why.hidden = !why.hidden;
+      b.setAttribute("aria-expanded", String(!why.hidden));
+    });
+    const wrap = document.createElement("span");
+    wrap.className = "cu";
+    wrap.append(b, why);
+    return wrap;
   }
 
   function citeList(section, items, label) {
@@ -65,6 +137,14 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       const span = document.createElement("span");
       span.className = "mono"; span.textContent = target.text;
       li.append(span);
+      for (const v of ORDER) {
+        const n = c.uses?.[v];
+        if (!n) continue;
+        const tag = document.createElement("span");
+        tag.className = `cu-badge static v-${v}`;
+        tag.textContent = n > 1 ? `${USE[v]} ×${n}` : USE[v];
+        li.append(" ", tag);
+      }
       return li;
     }));
   }
@@ -79,11 +159,12 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     const head = document.createElement("p");
     head.className = "meta"; head.textContent = who;
     const textEl = document.createElement("div");
-    if (body) paragraphs(textEl, body); else textEl.textContent = "Text not available yet; see the official source above.";
+    if (body) paragraphs(textEl, body, doc.cites.filter((c) => c.from === op.id)); else textEl.textContent = "Text not available yet; see the official source above.";
     box.replaceChildren(head, textEl);
   }
 
   async function load() {
+    $("m-link").href = `${base}/methodology/#citations`;
     const id = new URLSearchParams(location.search).get("id");
     if (!id) { $("status").textContent = "No document chosen. Pick one from Browse."; return; }
     let doc;
@@ -121,10 +202,20 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       showOpinion(doc, 0);
     } else if (doc.text) {
       $("d-text").hidden = false;
-      paragraphs($("d-text").querySelector(".opinion"), await text(doc.text));
+      paragraphs($("d-text").querySelector(".opinion"), await text(doc.text), doc.cites);
     }
-    const seen = new Set();
-    const cites = doc.cites.filter((c) => !seen.has(c.to) && seen.add(c.to));
+    const tally = doc.citation_use ?? {};
+    if (Object.keys(tally).length) {
+      $("d-use").hidden = false;
+      $("d-use").querySelector(".tally").textContent = ORDER.filter((v) => tally[v])
+        .map((v) => `${tally[v]} ${v === "insufficient" ? "not enough to judge" : USE[v].toLowerCase()}`).join(", ") + ".";
+    }
+    const byTarget = new Map();
+    for (const c of doc.cites) {
+      if (!byTarget.has(c.to)) byTarget.set(c.to, { ...c, uses: {} });
+      if (c.use) byTarget.get(c.to).uses[c.use] = (byTarget.get(c.to).uses[c.use] ?? 0) + 1;
+    }
+    const cites = [...byTarget.values()];
     citeList($("d-cites"), cites, (c) => ({ id: c.to, text: c.raw }));
     citeList($("d-cited-by"), doc.cited_by, (c) => ({ id: c.id, text: c.id }));
   }
@@ -144,4 +235,20 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .cites { padding-left: 20px; font-size: 14px; }
   .cites :global(li) { margin-bottom: 4px; overflow-wrap: anywhere; }
   .count { color: var(--ink-soft); font-size: .7em; }
+  .use-summary { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 14px; margin: 12px 0; font-size: 14px; }
+  .use-summary p { margin: 4px 0; }
+  .legend { color: var(--ink-soft); }
+  :global(.cu-badge) { font: inherit; font-size: 12px; line-height: 1.4; padding: 0 6px; border-radius: 4px; border: 1px solid currentColor; background: transparent; cursor: pointer; white-space: nowrap; vertical-align: baseline; }
+  :global(.cu-badge.static) { cursor: default; }
+  :global(.v-appropriate) { color: var(--ok); }
+  :global(.v-stretch) { color: var(--warn); }
+  :global(.v-improper) { color: var(--bad); }
+  :global(.v-insufficient) { color: var(--ink-soft); }
+  :global(.cu-cite) { color: inherit; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  :global(.cu-cite.v-appropriate) { text-decoration-color: var(--ok); }
+  :global(.cu-cite.v-stretch) { text-decoration-color: var(--warn); }
+  :global(.cu-cite.v-improper) { text-decoration-color: var(--bad); }
+  :global(.cu-cite.v-insufficient) { text-decoration-style: dotted; text-decoration-color: var(--ink-soft); }
+  :global(.cu-why[hidden]) { display: none; }
+  :global(.cu-why) { display: block; margin: 4px 0 8px; padding: 6px 10px; border-left: 3px solid var(--rule); background: var(--accent-wash); color: var(--ink); font-size: 14px; }
 </style>

@@ -65,9 +65,9 @@ def test_build_details_links_opinions_and_citations():
                 return Cur([("scotus/576-us-644", "Obergefell v. Hodges"),
                             ("scotus/381-us-479", "Griswold v. Connecticut")])
             return Cur([("scotus/576-us-644#0-majority", "scotus/576-us-644", "scotus/381-us-479",
-                         "485", "381 U.S. 479"),
+                         "485", "381 U.S. 479", "stretch", "Griswold protected marital privacy only."),
                         ("scotus/576-us-644#0-majority", "scotus/576-us-644", "usc/42/1983", None,
-                         "42 U.S.C. § 1983")])
+                         "42 U.S.C. § 1983", None, None)])
 
         def commit(self):
             pass
@@ -76,6 +76,8 @@ def test_build_details_links_opinions_and_citations():
     o = d["scotus/576-us-644"]
     assert o["opinions"][0]["text"] == "text/scotus/576-us-644/0-majority.txt"
     assert [c["title"] for c in o["cites"]] == ["Griswold v. Connecticut", None]
+    assert o["cites"][0]["use"] == "stretch" and "use" not in o["cites"][1]
+    assert o["citation_use"] == {"stretch": 1}
     assert d["scotus/381-us-479"]["cited_by"] == [{"id": "scotus/576-us-644", "title": "Obergefell v. Hodges"}]
 
 

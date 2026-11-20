@@ -7,6 +7,15 @@ import Base from "../layouts/Base.astro";
   <h2>Normalcy score</h2>
   <p>Analyses score precedent density, precedent survival, authority fidelity, departure magnitude, text and purpose alignment, and (for reactive laws) evidence of need. The combined score is shown as a percentile among everything scored, so 90 means more routine than 90% of scored artifacts.</p>
   <p>Bands: <b>Routine</b> 80–100, <b>Ordinary</b> 60–79, <b>Unusual</b> 40–59, <b>Novel</b> 20–39, <b>Unprecedented</b> 0–19.</p>
+  <h2 id="citations">How citations are checked</h2>
+  <p>Every citation of a Supreme Court case, a U.S. Code section or a public law in a ruling's opinions (majority, concurrences and dissents) or an executive document's text is checked separately. A model reads the passage around the citation, the cited authority's official summary or syllabus, and the part of the cited text that best matches the passage, where any quotation in the passage is looked up. It then marks the citation:</p>
+  <ul>
+    <li><b>Appropriate</b>: the authority supports the use or is fairly described. Citing a case to distinguish, criticize or overrule it counts, when the case is described accurately.</li>
+    <li><b>Stretch</b>: not technically wrong, but beyond what the authority held, such as dicta treated as a holding or a holding carried into a different setting without saying so.</li>
+    <li><b>Improper</b>: the authority does not say this or says the opposite. This is shown only when a second, independent check agrees; otherwise the second check's verdict is shown.</li>
+    <li><b>Not enough to judge</b>: the material available was too thin to tell.</li>
+  </ul>
+  <p>As with scores, the cited material is limited to what existed before the citing item. U.S. Code text is the latest annual edition, which can differ from the text in force at the time. Citations of lower-court opinions and regulations are not recognized yet, and citations of authorities not in the corpus are not checked. These marks describe citations only; they do not change the normalcy score.</p>
   <h2>Known limits</h2>
   <p>The AI models used for analysis were trained on text that includes later events. Inputs are restricted to material dated before each artifact, outputs that cite later material are rejected, and a separate check looks for reasoning that depends on hindsight, but this cannot be fully eliminated.</p>
   <p>A citation is flagged as incorrect only when two independent checks agree.</p>
