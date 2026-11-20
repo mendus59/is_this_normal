@@ -4,7 +4,10 @@
 - Site: Astro in `web/`; `npm run build` must pass.
 - Artifact IDs follow `pipeline/itn/ids.py`; never invent another format.
 - Anything that calls a model API belongs behind the `analyze` command and the `paid`
-  GitHub environment. Scheduled workflows must never receive `ANTHROPIC_API_KEY`.
+  GitHub environment. Scheduled workflows must never receive `ANTHROPIC_API_KEY`. The one
+  automatic paid run is Analyze after each Ingest: `analyze --unscored --profile economy`
+  on Haiku, capped by `vars.AUTO_SCORE_BUDGET` (default $1), off when `vars.AUTO_SCORE` is
+  `false` (Patrick's choice, 2026-11-20). Widen it only with his go-ahead.
 - Analysis inputs must be filtered to material dated before the artifact's `as_of` date in
   the data layer, not only by prompt instructions.
 

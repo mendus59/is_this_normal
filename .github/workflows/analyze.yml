@@ -1,8 +1,13 @@
-# Paid: spends model tokens. Runs only when dispatched by hand, and only after
-# the required reviewer approves the `paid` environment, which is the only
-# place ANTHROPIC_API_KEY exists.
+# Paid: spends model tokens, only in the `paid` environment, which is the only place
+# ANTHROPIC_API_KEY exists. Runs when dispatched by hand, and once after each Ingest on
+# main to score new entries: only items without a current score, economy profile (Haiku),
+# capped at vars.AUTO_SCORE_BUDGET (default $1). Set vars.AUTO_SCORE to 'false' to stop it.
 name: Analyze
 on:
+  workflow_run:
+    workflows: [Ingest]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       ids:
@@ -56,6 +61,7 @@ concurrency: analysis
 
 jobs:
   analyze:
+    if: github.event_name == 'workflow_dispatch' || (vars.AUTO_SCORE != 'false' && github.event.workflow_run.conclusion != 'cancelled')
     runs-on: ubuntu-latest
     environment: paid
     timeout-minutes: 360
@@ -69,6 +75,8 @@ jobs:
       IDS: ${{ inputs.ids }}
       TYPE: ${{ inputs.type }}
       YEARS: ${{ inputs.years }}
+      AUTO: ${{ github.event_name == 'workflow_run' }}
+      AUTO_BUDGET: ${{ vars.AUTO_SCORE_BUDGET || '1' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -78,9 +86,13 @@ jobs:
           cache-dependency-path: pipeline/pyproject.toml
       - run: pip install ./pipeline
       - name: Apply database migrations
-        if: ${{ !inputs.dry_run }}
+        if: ${{ github.event_name == 'workflow_run' || !inputs.dry_run }}
         run: itn migrate
+      - name: Score new entries (automatic, after Ingest)
+        if: ${{ github.event_name == 'workflow_run' }}
+        run: itn analyze --unscored --profile economy --max-tier haiku --budget "$AUTO_BUDGET"
       - name: Run analysis
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           args=(--budget "${{ inputs.budget }}" --max-tier "${{ inputs.max_tier }}")
           [ -n "$IDS" ] && args+=(--ids $IDS)
@@ -94,5 +106,5 @@ jobs:
           args+=(--profile "${{ inputs.profile }}")
           itn analyze "${args[@]}"
       - name: Calibration report
-        if: always()
+        if: ${{ always() && github.event_name == 'workflow_dispatch' }}
         run: itn calibration
