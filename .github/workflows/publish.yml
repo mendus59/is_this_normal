@@ -31,5 +31,7 @@ jobs:
           cache-dependency-path: pipeline/pyproject.toml
       - run: pip install ./pipeline
       - run: itn migrate
+      - name: Score routine new entries by rule (free, no model)
+        run: itn score-routine
       - run: itn publish
       - run: itn status
