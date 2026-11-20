@@ -11,12 +11,12 @@ CACHE_WRITE = 1.25
 CHUNK = 200                 # requests per batch; the budget is checked before each one is sent
 POLL_SECONDS = 30
 MAX_TOKENS = {"summary": 4_000, "authority_digest": 4_000, "citation_check": 2_000,
-              "type_assessment": 16_000, "verification": 16_000}
+              "type_assessment": 16_000, "verification": 16_000, "citation_use": 8_000}
 # Upper-end output guesses for reserving budget before batches are sent. Observed economy
 # outputs are about 1,200 tokens for assessments; half of MAX_TOKENS was far too high to
 # send a whole stage at once.
 EXPECTED_OUT = {"summary": 1_500, "authority_digest": 1_500, "citation_check": 600,
-                "type_assessment": 2_500, "verification": 2_500}
+                "type_assessment": 2_500, "verification": 2_500, "citation_use": 2_500}
 
 
 class BudgetExceeded(RuntimeError):

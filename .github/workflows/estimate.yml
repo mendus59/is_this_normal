@@ -11,6 +11,10 @@ on:
       sample:
         description: "Also estimate every in-scope item from a sample of this many per type (0 = skip)"
         default: "100"
+      citations:
+        description: "Also estimate checking how every citation is used (counts only)"
+        type: boolean
+        default: true
       max_tier:
         description: "Most capable model allowed"
         type: choice
@@ -44,6 +48,11 @@ jobs:
           args=(--dry-run --max-tier "${{ inputs.max_tier }}" --sample "${{ inputs.sample }}")
           [ "${{ inputs.pilot }}" = "true" ] && args+=(--pilot)
           itn analyze "${args[@]}"
+      - name: Citation checks (counts only)
+        if: ${{ inputs.citations }}
+        run: |
+          itn analyze --dry-run --citations
+          itn analyze --dry-run --citations --pilot
       - name: Calibration report (free; reads stored scores)
         if: always()
         run: itn calibration --detail

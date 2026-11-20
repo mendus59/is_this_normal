@@ -71,6 +71,14 @@ rules:
     near_unanimous: 4           # at most one in ten voting no on every recorded vote
     narrow: 2                   # under 55 percent in favor on a chamber's last recorded vote
 
+# How each citation is used (`itn analyze --citations`, Patrick's ask 2026-11-19): every
+# citation of a Supreme Court case, a U.S. Code section or a public law in a ruling's
+# opinions or an executive document's text is judged appropriate, a stretch, or improper.
+# Improper is published only when a second, independent check on `confirm_tier` agrees.
+# Shown next to each citation on the site. Not part of the normalcy score.
+citation_use:
+  confirm_tier: haiku
+
 verification:
   second_pass_bands: [novel, unprecedented]
   model_tier: opus
@@ -137,6 +145,7 @@ compare_escalate:
 stages:
   summary: haiku
   citation_check: haiku
+  citation_use: haiku
   authority_digest: sonnet
   type_assessment: sonnet
   verification: opus
@@ -151,6 +160,7 @@ economy:
   stages:
     summary: haiku
     citation_check: haiku
+    citation_use: haiku
     authority_digest: haiku
     type_assessment: haiku
     verification: haiku

@@ -18,6 +18,9 @@ _RATING = {"type": "integer", "enum": [INSUFFICIENT, 0, 1, 2, 3, 4]}
 
 
 def system_prompt(rubric: dict, stage: str) -> str:
+    if stage == "citation_use":
+        from itn.analyze.citation_use import SYSTEM
+        return SYSTEM
     scale = "\n".join(f"{k} = {v['band']}: {v['meaning']}" for k, v in rubric["scale"].items())
     return f"""You analyze U.S. Supreme Court rulings, presidential actions, and federal laws for
 IsThisNormal, a nonpartisan project that measures how far each one departed from how such

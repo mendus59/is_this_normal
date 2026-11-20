@@ -10,6 +10,11 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      task:
+        description: "score items, or check how each citation is used (appropriate, stretch, improper)"
+        type: choice
+        options: [score, citations]
+        default: score
       ids:
         description: "Artifact IDs, space separated (e.g. eo/14028 pl/117-169)"
         required: false
@@ -21,7 +26,7 @@ on:
         description: "Year range, e.g. 2001-2004"
         required: false
       unscored:
-        description: "Only artifacts without a current score"
+        description: "Only artifacts without a current score (citations: only items with unchecked citations)"
         type: boolean
         default: true
       unreviewed:
@@ -42,7 +47,7 @@ on:
         type: boolean
         default: true
       pilot:
-        description: "Score the 30 calibration anchors (ignores ids/type/years)"
+        description: "Score the 30 calibration anchors (ignores ids/type/years; citations: the ruling and executive anchors)"
         type: boolean
         default: false
       compare:
@@ -95,10 +100,14 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           args=(--budget "${{ inputs.budget }}" --max-tier "${{ inputs.max_tier }}")
+          citations=false
+          [ "${{ inputs.task }}" = "citations" ] && citations=true && args+=(--citations)
           [ -n "$IDS" ] && args+=(--ids $IDS)
           [ -n "$TYPE" ] && args+=(--type "$TYPE")
           [ -n "$YEARS" ] && args+=(--years "$YEARS")
-          [ "${{ inputs.unscored }}" = "true" ] && args+=(--unscored)
+          if [ "${{ inputs.unscored }}" = "true" ]; then
+            if $citations; then args+=(--unchecked); else args+=(--unscored); fi
+          fi
           [ "${{ inputs.unreviewed }}" = "true" ] && args+=(--unreviewed)
           [ "${{ inputs.dry_run }}" = "true" ] && args+=(--dry-run)
           [ "${{ inputs.pilot }}" = "true" ] && args+=(--pilot)
@@ -106,5 +115,5 @@ jobs:
           args+=(--profile "${{ inputs.profile }}")
           itn analyze "${args[@]}"
       - name: Calibration report
-        if: ${{ always() && github.event_name == 'workflow_dispatch' }}
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.task != 'citations' }}
         run: itn calibration
