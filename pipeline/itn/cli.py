@@ -124,6 +124,9 @@ STATUS_QUERIES = [
      " title ~* '(post office|postal facility|to designate|to name |rename|commemorat|coin|gold medal|courthouse"
      "|land conveyance|to convey|memorial|national day|technical correction|clinic)',"
      " count(*), count(*) FILTER (WHERE slen > 1500) FROM l GROUP BY 1, 2 ORDER BY 1, 2"),
+    ("In-scope items without a current score, by type",
+     "SELECT type, count(*) FROM artifact WHERE in_scope AND NOT EXISTS"
+     " (SELECT 1 FROM score s WHERE s.artifact_id = artifact.id AND s.current) GROUP BY 1 ORDER BY 1"),
     ("Ingest cursors", "SELECT source, left(cursor::text, 200) FROM ingest_cursor ORDER BY source"),
 ]
 
@@ -275,6 +278,9 @@ def cmd_analyze(args) -> None:
         else:
             ids = _scope_ids(conn, args)
     if not ids:
+        if args.unscored:
+            print("Nothing to score: every in-scope item already has a current score.")
+            return
         sys.exit("Nothing in scope.")
     print(f"Scoring {len(ids)} items, {args.profile} settings"
           f"{' (trial: scores stay off the site)' if args.compare else ''}", flush=True)
@@ -282,6 +288,34 @@ def cmd_analyze(args) -> None:
                         compare=args.compare, dispatched_by=os.environ.get("GITHUB_ACTOR"), scope=scope,
                         log=lambda m: print(m, flush=True), profile=args.profile)
     pipeline.score(ids)
+
+
+def unscored_ids(conn) -> list[str]:
+    """In-scope items with no current score, oldest first."""
+    rows = conn.execute(
+        "SELECT id FROM artifact WHERE in_scope AND NOT EXISTS"
+        " (SELECT 1 FROM score s WHERE s.artifact_id = artifact.id AND s.current)"
+        " ORDER BY effective_date, id").fetchall()
+    conn.commit()
+    return [r[0] for r in rows]
+
+
+def cmd_score_routine(args) -> None:
+    """Free: score unscored routine executive documents by rule, with no model call.
+    The rest wait for `itn analyze --unscored`."""
+    from itn.analyze import data
+    from itn.analyze.rubric import load_rubric
+    from itn.analyze.stages import Pipeline
+
+    with db.connect() as conn:
+        ids = unscored_ids(conn)
+        items = data.load_items(conn, ids) if ids else []
+    routine = [i for i in items if i.presort]
+    if routine:
+        Pipeline(None, None, load_rubric(), 0, "haiku", profile="economy", record_run=False,
+                 log=lambda m: print(m, flush=True))._write_presorted(routine)
+    print(f"Unscored in-scope items: {len(ids)}; scored by rule now: {len(routine)};"
+          f" left for the model: {len(ids) - len(routine)}")
 
 
 def cmd_calibration(args) -> None:
@@ -394,6 +428,8 @@ def main(argv=None) -> None:
 
     sub.add_parser("publish", help="export static files to R2 (free)").set_defaults(fn=cmd_publish)
     sub.add_parser("status", help="counts of loaded and missing records (free)").set_defaults(fn=cmd_status)
+    sub.add_parser("score-routine", help="score unscored routine executive documents by rule (free, no model)"
+                   ).set_defaults(fn=cmd_score_routine)
 
     cal = sub.add_parser("calibration", help="anchor bands vs scores (free)")
     cal.add_argument("--detail", action="store_true", help="also print each economy rating and its evidence")
