@@ -54,6 +54,12 @@ def build_catalog(conn) -> list[dict]:
         """
     ).fetchall()
     raw = {r[0]: r[9] for r in rows if r[9] is not None}
+    # Items the model read but could not rate on any dimension (too little material):
+    # analyzed, so the site should not call them "not yet analyzed".
+    unrated = {r[0] for r in rows if r[9] is None}
+    insufficient = {r[0] for r in conn.execute(
+        "SELECT DISTINCT subject_id FROM analysis WHERE kind IN ('type_assessment', 'verification')"
+        " AND subject_id = ANY(%s)", (sorted(unrated),)).fetchall()} if unrated else set()
     pct = percentiles_by_type(raw, {r[0]: r[1] for r in rows})
     catalog = []
     for (aid, typ, subtype, title, date, in_scope, contentious, summary, sources, _raw, conf) in rows:
@@ -64,6 +70,8 @@ def build_catalog(conn) -> list[dict]:
         }
         if aid in pct:
             entry.update(percentile=pct[aid], band=band(pct[aid]), confidence=conf)
+        elif aid in insufficient:
+            entry["analysis"] = "insufficient"
         catalog.append(entry)
     return catalog
 
