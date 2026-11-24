@@ -60,7 +60,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     title.href = `${trendBase.replace(/trends\/$/, "")}read/?id=${encodeURIComponent(a.id)}`;
     const band = document.createElement("span");
     band.className = `band band-${a.bandKey}`;
-    band.textContent = a.band ? `${bandLabel(a.band)} · ${a.percentile}` : "not yet analyzed";
+    band.textContent = a.band ? `${bandLabel(a.band)} · ${a.percentile}`
+      : a.analysis === "insufficient" ? "too little material to rate" : "not yet analyzed";
     li.append(meta, title, band);
     const src = a.sources?.[0];
     if (src?.url) {

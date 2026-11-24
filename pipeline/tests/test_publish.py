@@ -90,3 +90,24 @@ def test_changed_details_skips_known_hashes():
     assert changed_details(details, known) == {}
     details["b"]["title"] = "new"
     assert set(changed_details(details, known)) == {"b"}
+
+
+def test_catalog_marks_items_the_model_could_not_rate():
+    import datetime as dt
+    from types import SimpleNamespace as NS
+    from itn.publish import export
+
+    def row(aid, raw):
+        return (aid, "executive_document", "memorandum", "T", dt.date(2009, 5, 20), True, False, "", [], raw, 0.5)
+
+    class Conn:
+        def execute(self, sql, params=()):
+            if sql.lstrip().startswith("SELECT a.id"):
+                return NS(fetchall=lambda: [row("fr/a", 0.7), row("fr/b", 0.3), row("fr/thin", None), row("fr/new", None)])
+            assert "FROM analysis" in sql and params[0] == ["fr/new", "fr/thin"]
+            return NS(fetchall=lambda: [("fr/thin",)])
+
+    cat = {e["id"]: e for e in export.build_catalog(Conn())}
+    assert "band" in cat["fr/a"] and "analysis" not in cat["fr/a"]
+    assert cat["fr/thin"].get("analysis") == "insufficient" and "band" not in cat["fr/thin"]
+    assert "analysis" not in cat["fr/new"]
