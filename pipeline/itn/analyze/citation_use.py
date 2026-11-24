@@ -63,8 +63,11 @@ says or holds? Pick one verdict:
 - improper: the authority does not say this or says the opposite. For example, the
   holding is misstated, a quotation does not appear or its meaning is altered, the case
   is cited for a rule it rejected, or the cited provision does not address the point.
-- insufficient: the material given is not enough to tell (for example, a pinpoint page
-  whose content is not in the excerpt). Prefer this over guessing.
+- insufficient: the material given is not enough to tell. Use this, not stretch, when
+  the passage relies on a pinpoint page, a quotation or a specific statement that the
+  excerpt and summary do not show: missing material is not evidence of a stretch. Use it
+  too when the cited authority's title does not match the case or statute the passage
+  names (the corpus may hold a different document at that page).
 
 Rules:
 - Judge only from the material given. It contains nothing dated after the citing item.
@@ -72,8 +75,10 @@ Rules:
 - Disagreeing with the opinion's conclusion is not a misuse. Dissents and concurrences are
   judged by the same standard as majorities; arguing that a case was wrongly decided is
   an appropriate use of it when the case is described accurately.
-- A quotation that is not found in the excerpt is not by itself improper: texts come from
-  different sources and can differ in formatting or be incomplete.
+- A quotation that is not found in the excerpt is not by itself improper or a stretch:
+  texts come from different sources and can differ in formatting or be incomplete.
+- Stretch and improper need a positive reason from the material: what the authority
+  actually held or said, and how the passage goes beyond it or contradicts it.
 - U.S. Code text is the latest edition and may differ from the text in force at the time.
   Do not call a citation improper only because the current wording differs.
 - Be even-handed across courts, justices, parties and presidents. Describe; do not
