@@ -12,7 +12,7 @@ import time
 from itn import db, ids
 from itn.extract import citations
 
-EXTRACTOR = "text-v1"
+EXTRACTOR = "text-v2"     # v2: multi-letter sections (668dd, 360bbb-3); v1 rows are redone
 TYPES = ("executive_document", "public_law")
 EYECITE_MAX_CHARS = 300_000
 
@@ -45,8 +45,11 @@ def todo(conn) -> list[tuple[str, str, object]]:
     rows = conn.execute(
         "SELECT a.id, a.text_key, a.effective_date FROM artifact a"
         " WHERE a.type = ANY(%s) AND a.in_scope AND a.text_key IS NOT NULL"
-        " AND NOT EXISTS (SELECT 1 FROM component c WHERE c.artifact_id = a.id AND c.kind = 'text')"
-        " ORDER BY a.effective_date, a.id", (list(TYPES),)).fetchall()
+        " AND (NOT EXISTS (SELECT 1 FROM component c WHERE c.artifact_id = a.id AND c.kind = 'text')"
+        "   OR EXISTS (SELECT 1 FROM component c JOIN citation ct ON ct.from_component = c.id"
+        "     WHERE c.artifact_id = a.id AND c.kind = 'text' AND ct.extractor LIKE 'text-%%'"
+        "     AND ct.extractor <> %s))"
+        " ORDER BY a.effective_date, a.id", (list(TYPES), EXTRACTOR)).fetchall()
     conn.commit()
     return rows
 
@@ -65,6 +68,9 @@ def run(conn, r2, max_minutes: float = 95, **_) -> int:
                 "author": None, "joined_by": [], "ord": 0, "text_key": key}
         rows = rows_for(text, date.isoformat() if date else None, aid)
         db.upsert_component(conn, comp)
+        # Rows from an earlier version of this extractor are replaced, not kept beside the new ones.
+        conn.execute("DELETE FROM citation WHERE from_component = %s AND extractor LIKE 'text-%%'"
+                     " AND extractor <> %s", (comp["id"], EXTRACTOR))
         db.replace_citations(conn, comp["id"], EXTRACTOR, rows)
         conn.commit()
         count += 1

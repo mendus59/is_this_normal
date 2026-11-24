@@ -290,8 +290,34 @@ class TextCache:
         return text
 
 
-def groups_for(item, rows: list[tuple], r2, cited_keys: dict[str, list[str]], cache: TextCache) -> list[Group]:
-    """One or more groups of up to CHUNK citations per opinion of `item`."""
+_CASE_NAME = re.compile(r"\bv\.\s|\bIn re\b|\bEx parte\b")
+_NAME_WORD = re.compile(r"[A-Za-z][A-Za-z'&-]{3,}")
+_GENERIC = {"united", "states", "america", "city", "county", "state", "commission", "board", "department",
+            "company", "corp", "corporation", "inc.", "district", "court", "parte", "people", "secretary",
+            "national", "american", "association", "federal", "petitioner", "respondent", "others"}
+
+
+def name_mismatch(passage_text: str, title: str, cited_type: str) -> bool:
+    """True when the passage names a case right before the citation and the cited item's
+    title shares no distinctive word with it: the corpus holds a different document at that
+    page (an orders-list page, a reporter collision), so the check would judge the wrong case."""
+    if cited_type != "scotus_case" or not title:
+        return False
+    # Only the citation's own clause: in a string cite, an earlier case's name is not this one's.
+    before = re.split(r"[;)]", passage_text.split("⟦", 1)[0][-160:])[-1]
+    if not _CASE_NAME.search(before):
+        return False
+    words = {w.lower() for w in _NAME_WORD.findall(title)} - _GENERIC
+    if not words:
+        return False
+    low = before.lower()
+    return not any(w in low for w in words)
+
+
+def groups_for(item, rows: list[tuple], r2, cited_keys: dict[str, list[str]], cache: TextCache,
+               skipped: list | None = None) -> list[Group]:
+    """One or more groups of up to CHUNK citations per opinion of `item`. Citations whose
+    cited page holds a different case are left out (and listed in `skipped`)."""
     by_comp: OrderedDict[str, list[tuple]] = OrderedDict()
     for r in rows:
         by_comp.setdefault(r[2], []).append(r)
@@ -306,9 +332,14 @@ def groups_for(item, rows: list[tuple], r2, cited_keys: dict[str, list[str]], ca
             if span:
                 used.add(span[0])
                 p = passage(text, span)
-            else:
-                p = norm(ctx or "")
+            else:  # no opinion text: the stored context, with the citation marked when found
+                cspan = locate(ctx or "", raw, pin, set())
+                p = passage(ctx, cspan) if cspan else norm(ctx or "")
             if not p:
+                continue
+            if name_mismatch(p, title, typ):
+                if skipped is not None:
+                    skipped.append(cid)
                 continue
             cited = cache.get(tuple(cited_keys.get(to) or []), CITED_TEXT_MAX)
             ex, found = excerpt(p, cited)
@@ -320,7 +351,7 @@ def groups_for(item, rows: list[tuple], r2, cited_keys: dict[str, list[str]], ca
     return out
 
 
-def build_groups(r2, items: list, log=print) -> list[Group]:
+def build_groups(r2, items: list, log=print) -> tuple[list[Group], list[int]]:
     by_item: dict[str, list[tuple]] = {}
     ids = [i.id for i in items]
     for k in range(0, len(ids), 100):
@@ -338,8 +369,11 @@ def build_groups(r2, items: list, log=print) -> list[Group]:
         f" ({len(cited)} distinct authorities)")
     todo = [i for i in items if i.id in by_item]
     with ThreadPoolExecutor(READERS) as pool:
-        parts = list(pool.map(lambda i: groups_for(i, by_item[i.id], r2, keys, cache), todo))
-    return [g for part in parts for g in part]
+        skipped: list[int] = []
+        parts = list(pool.map(lambda i: groups_for(i, by_item[i.id], r2, keys, cache, skipped), todo))
+    if skipped:
+        log(f"{STAGE}: {len(skipped)} citations left out: the cited page holds a different case")
+    return [g for part in parts for g in part], skipped
 
 
 # ---- the run -----------------------------------------------------------------------
@@ -348,7 +382,9 @@ def run(p, ids: list[str]) -> dict:
     """Check every citation of `ids` with the pipeline `p` (cache, batches, budget)."""
     with db.connect() as c:
         items = data.load_items(c, ids)
-    groups = build_groups(p.r2, items, p.log)
+    groups, skipped = build_groups(p.r2, items, p.log)
+    if skipped and not p.compare:
+        unjudge(skipped)
     if not groups:
         p.log(f"{STAGE}: nothing to check")
         return {}
@@ -394,6 +430,13 @@ def run(p, ids: list[str]) -> dict:
     p.log(f"{STAGE}: {len(results)} citations judged: " + ", ".join(f"{v} {n}" for v, n in counts.items())
           + f"; {len(recheck)} groups re-checked")
     return results
+
+
+def unjudge(citation_ids: list[int]) -> None:
+    """Drop verdicts on citations that are no longer checked (their cited page holds another case)."""
+    with db.connect() as c:
+        c.execute("DELETE FROM citation_use WHERE citation_id = ANY(%s)", (citation_ids,))
+        c.commit()
 
 
 def store(results: dict[int, dict]) -> None:

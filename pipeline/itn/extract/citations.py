@@ -58,8 +58,9 @@ def extract(text: str, citing_date: str | None = None) -> list[dict]:
 
 
 # Federal Register documents and enrolled laws cite the Code as "8 U.S.C. 1182(f)",
-# without the section sign eyecite expects.
-_BARE_USC = re.compile(r"\b(\d{1,2})\s+U\.\s?S\.\s?C\.\s+(?:§+\s*)?(\d+[a-z]?(?:-\d+[a-z]?)?)")
+# without the section sign eyecite expects. Section numbers can carry several letters and
+# a dash ("16 U.S.C. 668dd", "21 U.S.C. 360bbb-3", "15 U.S.C. 78dd-1", "26 U.S.C. 1400Z-1").
+_BARE_USC = re.compile(r"\b(\d{1,2})\s+U\.\s?S\.\s?C\.\s+(?:§+\s*)?(\d+[A-Za-z]*(?:-\d+[A-Za-z]*)?)")
 
 
 def extract_statutes(text: str) -> list[str]:
