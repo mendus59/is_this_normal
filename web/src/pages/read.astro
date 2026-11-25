@@ -15,7 +15,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       <p><b>How its citations are used.</b> <span class="tally"></span></p>
       <p class="legend">Each checked citation is marked in the text: <span class="cu-badge v-appropriate">Appropriate</span> the cited authority supports it; <span class="cu-badge v-stretch">Stretch</span> not technically wrong, but beyond what the authority held; <span class="cu-badge v-improper">Improper</span> the authority does not say this (two independent checks agreed). Select a mark for the reason. <a id="m-link" href="#">How citations are checked</a></p>
     </section>
-    <section id="d-summary" hidden><h2>Summary</h2><p class="summary"></p></section>
+    <section id="d-brief" class="brief" hidden><h2>In brief</h2><p></p><p class="brief-note">A plain-language summary written by an AI model from this item's official summary and text. Read the text for the details.</p></section>
+    <section id="d-summary" hidden><h2>Official summary</h2><p class="summary"></p></section>
     <section id="d-opinions" hidden>
       <h2>Opinions</h2>
       <div id="tabs" class="tabs" role="tablist"></div>
@@ -189,6 +190,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       a.href = s.url; a.textContent = s.label; a.rel = "noopener";
       return i ? [" · ", a] : [a];
     }));
+    if (doc.brief) { $("d-brief").hidden = false; $("d-brief").querySelector("p").textContent = doc.brief; }
     if (doc.summary) { $("d-summary").hidden = false; paragraphs($("d-summary").querySelector(".summary"), doc.summary); }
     if (doc.opinions.length) {
       $("d-opinions").hidden = false;
@@ -235,6 +237,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .cites { padding-left: 20px; font-size: 14px; }
   .cites :global(li) { margin-bottom: 4px; overflow-wrap: anywhere; }
   .count { color: var(--ink-soft); font-size: .7em; }
+  .brief p { font-size: 17px; line-height: 1.55; margin: 4px 0; }
+  .brief .brief-note { font-size: 13px; color: var(--ink-soft); }
   .use-summary { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 14px; margin: 12px 0; font-size: 14px; }
   .use-summary p { margin: 4px 0; }
   .legend { color: var(--ink-soft); }

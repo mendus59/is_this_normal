@@ -16,6 +16,8 @@ import Base from "../layouts/Base.astro";
     <li><b>Not enough to judge</b>: the material available was too thin to tell.</li>
   </ul>
   <p>As with scores, the cited material is limited to what existed before the citing item. U.S. Code text is the latest annual edition, which can differ from the text in force at the time. Citations of lower-court opinions and regulations are not recognized yet, and citations of authorities not in the corpus are not checked. These marks describe citations only; they do not change the normalcy score.</p>
+  <h2 id="summaries">Plain-language summaries</h2>
+  <p>The short summary at the top of each item ("In brief") is written by an AI model (Claude Haiku) from the item's own official summary or syllabus and its text: for a ruling, the syllabus, its holding and the end of the Court's opinion; for a law or presidential document, the official summary and the start of the text. It is told to describe what the item does or decides and whom it mainly affects, in neutral terms, and to leave out later events. It can miss parts of very long laws. The official summary and the full text are on the same page.</p>
   <h2>Known limits</h2>
   <p>The AI models used for analysis were trained on text that includes later events. Inputs are restricted to material dated before each artifact, outputs that cite later material are rejected, and a separate check looks for reasoning that depends on hindsight, but this cannot be fully eliminated.</p>
   <p>A citation is flagged as incorrect only when two independent checks agree.</p>
