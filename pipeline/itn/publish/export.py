@@ -11,6 +11,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from bisect import bisect_right
 
+from itn.analyze.overview import current as briefs
 from itn.storage import R2
 
 BANDS = [(80, "routine"), (60, "ordinary"), (40, "unusual"), (20, "novel"), (0, "unprecedented")]
@@ -69,6 +70,7 @@ def build_catalog(conn) -> list[dict]:
             " JOIN citation c ON c.id = u.citation_id JOIN component f ON f.id = c.from_component"
             " WHERE u.verdict IS NOT NULL GROUP BY 1, 2").fetchall():
         uses.setdefault(aid, {})[verdict] = n
+    brief = briefs(conn)   # plain-language summaries (itn analyze --overview)
     catalog = []
     for (aid, typ, subtype, title, date, in_scope, contentious, summary, sources, _raw, conf) in rows:
         entry = {
@@ -82,6 +84,8 @@ def build_catalog(conn) -> list[dict]:
             entry["analysis"] = "insufficient"
         if aid in uses:
             entry["citation_use"] = uses[aid]
+        if aid in brief:
+            entry["brief"] = brief[aid]
         catalog.append(entry)
     return catalog
 
@@ -106,6 +110,9 @@ def build_details(conn) -> dict[str, dict]:
         if aid in arts and kind != "text":  # a document's single text is shown as the document
             arts[aid]["opinions"].append({"id": cid, "kind": kind, "author": author,
                                           "joined_by": joined, "text": text_key})
+    for aid, text in briefs(conn).items():
+        if aid in arts:
+            arts[aid]["brief"] = text
     titles = dict(conn.execute("SELECT id, title FROM artifact").fetchall())
     seen = set()
     for (from_comp, from_art, to, pin, raw, verdict, reason) in conn.execute(

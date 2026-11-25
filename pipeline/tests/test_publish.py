@@ -53,6 +53,8 @@ def test_build_details_links_opinions_and_citations():
 
     class Conn:
         def execute(self, sql, *_):
+            if "kind = %s" in sql and "DISTINCT ON (subject_id)" in sql:
+                return Cur([("scotus/576-us-644", {"summary": "The Court held that states must license same-sex marriages."})])
             if "FROM artifact WHERE in_scope" in sql:
                 return Cur([("scotus/576-us-644", "scotus_case", "opinion", "Obergefell v. Hodges",
                              date(2015, 6, 26), True, None, [], None),
@@ -78,6 +80,7 @@ def test_build_details_links_opinions_and_citations():
     assert [c["title"] for c in o["cites"]] == ["Griswold v. Connecticut", None]
     assert o["cites"][0]["use"] == "stretch" and "use" not in o["cites"][1]
     assert o["citation_use"] == {"stretch": 1}
+    assert o["brief"].startswith("The Court held") and "brief" not in d["scotus/381-us-479"]
     assert d["scotus/381-us-479"]["cited_by"] == [{"id": "scotus/576-us-644", "title": "Obergefell v. Hodges"}]
 
 
@@ -106,11 +109,17 @@ def test_catalog_marks_items_the_model_could_not_rate():
                 return NS(fetchall=lambda: [row("fr/a", 0.7), row("fr/b", 0.3), row("fr/thin", None), row("fr/new", None)])
             if "FROM citation_use" in sql:
                 return NS(fetchall=lambda: [("fr/a", "appropriate", 4), ("fr/a", "improper", 1)])
+            if "DISTINCT ON (subject_id)" in sql:
+                return NS(fetchall=lambda: [("fr/a", {"summary": " Directs  agencies. "}), ("fr/b", {"summary": ""})])
             assert "FROM analysis" in sql and params[0] == ["fr/new", "fr/thin"]
             return NS(fetchall=lambda: [("fr/thin",)])
+
+        def commit(self):
+            pass
 
     cat = {e["id"]: e for e in export.build_catalog(Conn())}
     assert "band" in cat["fr/a"] and "analysis" not in cat["fr/a"]
     assert cat["fr/thin"].get("analysis") == "insufficient" and "band" not in cat["fr/thin"]
     assert "analysis" not in cat["fr/new"]
     assert cat["fr/a"]["citation_use"] == {"appropriate": 4, "improper": 1} and "citation_use" not in cat["fr/b"]
+    assert cat["fr/a"]["brief"] == "Directs agencies." and "brief" not in cat["fr/b"]

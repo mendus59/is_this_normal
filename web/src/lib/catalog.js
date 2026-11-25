@@ -71,7 +71,7 @@ export function prepare(raw) {
     bandKey: a.band ?? NOT_ANALYZED,
     citeKey: citeKey(a.citation_use),
     _title: (a.title ?? "").toLowerCase(),
-    _text: [a.title, a.summary, a.id, humanize(a.subtype)].filter(Boolean).join(" \n ").toLowerCase(),
+    _text: [a.title, a.brief, a.summary, a.id, humanize(a.subtype)].filter(Boolean).join(" \n ").toLowerCase(),
   }));
 }
 

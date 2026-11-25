@@ -7,6 +7,7 @@
 Is a Supreme Court ruling, executive action or contentious law "normal"?
 
 - Measures each ruling, executive action and contentious law since 2000 against the precedent, statute text and public data that existed when it happened.
+- Gives each item a short plain-language summary of what it does or decides.
 - Free daily ingestion of public records (Federal Register, Congress, Supreme Court opinions) into a citation graph.
 - New entries are scored automatically each day against versioned rubrics, within a small daily budget.
 - Marks each checked citation as appropriate, a stretch, or improper, with the reason, and flags and filters items that cite improperly.
