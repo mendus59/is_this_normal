@@ -50,3 +50,16 @@ def test_estimate_is_cents_per_thousand():
     e = ov.estimate([("scotus_case", ov.ITEM_CHARS)] * 1000 + [("public_law", 2_000)] * 10)
     assert e["items"] == 1010 and set(e["by_type"]) == {"scotus_case", "public_law"}
     assert 0.05 < e["usd"] < 1.0
+
+
+def test_every_stage_is_an_allowed_analysis_kind():
+    import re
+    from itn.config import migrations_dir
+    last = None
+    for f in sorted(migrations_dir().glob("*.sql")):
+        for m in re.finditer(r"analysis_kind_check CHECK \(kind IN \(([^)]*)\)", f.read_text()):
+            last = set(re.findall(r"'(\w+)'", m.group(1)))
+    if last is None:
+        sql = (migrations_dir() / "001_init.sql").read_text()
+        last = set(re.findall(r"'(\w+)'", sql.split("kind           text NOT NULL CHECK (kind IN (", 1)[1].split(")", 1)[0]))
+    assert set(llm.MAX_TOKENS) <= last, set(llm.MAX_TOKENS) - last
