@@ -290,6 +290,8 @@ def cmd_analyze(args) -> None:
     """Paid analysis. Only the `paid` GitHub environment has the API key."""
     if args.citations:
         return _analyze_citations(args)
+    if args.overview:
+        return _analyze_overview(args)
     scope = {"ids": args.ids, "type": args.type, "years": args.years, "unscored": args.unscored,
              "unreviewed": args.unreviewed, "pilot": args.pilot, "sample": args.sample, "compare": args.compare, "profile": args.profile}
     print(f"Scope: {scope}  budget: ${args.budget:.2f}  max tier: {args.max_tier}  dry run: {args.dry_run}")
@@ -352,6 +354,63 @@ def _analyze_citations(args) -> None:
                         compare=args.compare, dispatched_by=os.environ.get("GITHUB_ACTOR"), scope=scope,
                         log=lambda m: print(m, flush=True), profile=args.profile)
     pipeline.check_citations(ids)
+
+
+def _overview_scope(conn, args) -> list[str]:
+    from itn.analyze import overview as ov
+    if args.pilot:  # the calibration anchors, every type
+        from itn.analyze import estimate as est
+        from itn.analyze.rubric import load_anchors
+        args.ids = [aid for typ, entries in load_anchors().items() if isinstance(entries, list)
+                    for a in entries if (aid := est.resolve_anchor(conn, typ, a))]
+    return ov.scope_ids(conn, ids=args.ids, types=[args.type] if args.type else None, years=args.years,
+                        missing=args.unscored)
+
+
+def _analyze_overview(args) -> None:
+    """Plain-language summaries for readers (see itn.analyze.overview). Always the economy
+    profile on Haiku, so the cache key does not depend on the workflow's profile input."""
+    from itn.analyze import overview as ov
+    scope = {"task": "overview", "ids": args.ids, "type": args.type, "years": args.years,
+             "missing": args.unscored, "pilot": args.pilot, "compare": args.compare}
+    print(f"Scope: {scope}  budget: ${args.budget:.2f}  dry run: {args.dry_run}")
+    with db.connect() as conn:
+        ids = _overview_scope(conn, args)
+        if args.dry_run:
+            from itn.analyze.estimate import RANGE
+            from itn.analyze.rubric import load_rubric
+            run = load_rubric().get("run", {})
+            rows = []
+            for k in range(0, len(ids), 1000):
+                rows += ov.sizes(conn, ids[k:k + 1000])
+            e = ov.estimate(rows, "haiku", bool(run.get("batch")) and len(rows) >= 100, bool(run.get("prompt_caching")))
+            lo, hi = RANGE
+            print(f"== Summaries: {e['items']:,} items on Haiku (upper bound: every item at {ov.ITEM_CHARS:,} characters)")
+            for typ, t in sorted(e["by_type"].items()):
+                print(f"  {typ:20} items {t['items']:>8,}   ${t['usd']:>8,.2f}")
+            print(f"  total ${e['usd']:,.2f}  (range ${e['usd'] * lo:,.2f} to ${e['usd'] * hi:,.2f})")
+            print("\nDry run: no model was called and nothing was spent.")
+            return
+    if not ids:
+        if args.unscored:
+            print("Nothing to summarize: every in-scope item already has a summary.")
+            return
+        sys.exit("Nothing in scope.")
+    if args.budget <= 0:
+        sys.exit("A paid run needs --budget greater than 0.")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.exit("ANTHROPIC_API_KEY is not set. Paid runs only work in the `paid` environment.")
+    import anthropic
+
+    from itn.analyze.rubric import load_rubric
+    from itn.analyze.stages import Pipeline
+    from itn.storage import R2
+
+    print(f"Summarizing {len(ids)} items", flush=True)
+    pipeline = Pipeline(R2(), anthropic.Anthropic(), load_rubric(), args.budget, "haiku",
+                        compare=args.compare, dispatched_by=os.environ.get("GITHUB_ACTOR"), scope=scope,
+                        log=lambda m: print(m, flush=True), profile="economy")
+    pipeline.write_overviews(ids)
 
 
 def unscored_ids(conn) -> list[str]:
@@ -516,6 +575,8 @@ def main(argv=None) -> None:
                     help="economy: one Haiku pass per item from free material (rubric `economy:`)")
     an.add_argument("--citations", action="store_true",
                     help="judge how each citation is used (appropriate, stretch, improper) instead of scoring")
+    an.add_argument("--overview", action="store_true",
+                    help="write a short plain-language summary of each item (with --unscored: only items without one)")
     an.add_argument("--unchecked", action="store_true",
                     help="--citations: only items with citations not judged yet")
     an.add_argument("--sample", type=int, default=0,

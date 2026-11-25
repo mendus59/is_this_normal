@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: "score items, or check how each citation is used (appropriate, stretch, improper)"
+        description: "score items, check how each citation is used (appropriate, stretch, improper), or write plain-language summaries"
         type: choice
-        options: [score, citations]
+        options: [score, citations, summaries]
         default: score
       ids:
         description: "Artifact IDs, space separated (e.g. eo/14028 pl/117-169)"
@@ -26,7 +26,7 @@ on:
         description: "Year range, e.g. 2001-2004"
         required: false
       unscored:
-        description: "Only artifacts without a current score (citations: only items with unchecked citations)"
+        description: "Only artifacts without a current score (citations: only items with unchecked citations; summaries: only items without one)"
         type: boolean
         default: true
       unreviewed:
@@ -102,6 +102,7 @@ jobs:
           args=(--budget "${{ inputs.budget }}" --max-tier "${{ inputs.max_tier }}")
           citations=false
           [ "${{ inputs.task }}" = "citations" ] && citations=true && args+=(--citations)
+          [ "${{ inputs.task }}" = "summaries" ] && args+=(--overview)
           [ -n "$IDS" ] && args+=(--ids $IDS)
           [ -n "$TYPE" ] && args+=(--type "$TYPE")
           [ -n "$YEARS" ] && args+=(--years "$YEARS")
@@ -115,5 +116,5 @@ jobs:
           args+=(--profile "${{ inputs.profile }}")
           itn analyze "${args[@]}"
       - name: Calibration report
-        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.task != 'citations' }}
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.task == 'score' }}
         run: itn calibration

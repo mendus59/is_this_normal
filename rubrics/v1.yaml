@@ -146,6 +146,7 @@ stages:
   summary: haiku
   citation_check: haiku
   citation_use: haiku
+  overview: haiku            # public plain-language summary (itn analyze --overview)
   authority_digest: sonnet
   type_assessment: sonnet
   verification: opus
@@ -161,6 +162,7 @@ economy:
     summary: haiku
     citation_check: haiku
     citation_use: haiku
+    overview: haiku
     authority_digest: haiku
     type_assessment: haiku
     verification: haiku
