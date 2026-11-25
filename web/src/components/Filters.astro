@@ -1,5 +1,5 @@
 ---
-import { TYPES, ADMINS, BANDS, NOT_ANALYZED, bandLabel } from "../lib/catalog.js";
+import { TYPES, ADMINS, BANDS, NOT_ANALYZED, CITE_USES, bandLabel } from "../lib/catalog.js";
 interface Props { showSort?: boolean }
 const { showSort = false } = Astro.props;
 ---
@@ -35,6 +35,10 @@ const { showSort = false } = Astro.props;
       <option value={NOT_ANALYZED}>{bandLabel(NOT_ANALYZED)}</option>
     </select>
   </label>
+  <fieldset class="cites">
+    <legend>Citation use</legend>
+    {CITE_USES.map((c) => <label class="box"><input type="checkbox" name="f-cites" value={c.id} checked /> {c.label}</label>)}
+  </fieldset>
   {showSort && (
     <label>Sort
       <select id="f-sort">
@@ -48,7 +52,7 @@ const { showSort = false } = Astro.props;
   )}
   <button id="f-reset" type="button" class="reset">Clear</button>
 </form>
-<p class="hint">Search covers titles, summaries, and IDs. Use quotes for a phrase, OR for alternatives, and a leading minus to exclude a word.</p>
+<p class="hint">Search covers titles, summaries, and IDs. Use quotes for a phrase, OR for alternatives, and a leading minus to exclude a word. Citation use sorts each item by the worst verdict among its checked citations.</p>
 
 <style>
   .filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 14px; margin: 24px 0 4px; }
@@ -58,5 +62,9 @@ const { showSort = false } = Astro.props;
   select, input, .reset { font: inherit; font-size: 15px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--ink); max-width: 100%; }
   select:disabled { opacity: .5; }
   .reset { cursor: pointer; color: var(--accent); }
+  .cites { border: 1px solid var(--rule); border-radius: 4px; padding: 4px 10px 6px; margin: 0; display: flex; flex-wrap: wrap; gap: 2px 14px; min-width: 0; }
+  .cites legend { font-size: 13px; color: var(--ink-soft); padding: 0 4px; }
+  .filters .cites .box { display: flex; align-items: center; gap: 5px; font-size: 14px; color: var(--ink); }
+  .cites input { padding: 0; margin: 0; }
   .hint { font-size: 12.5px; color: var(--ink-soft); margin: 6px 0 0; }
 </style>

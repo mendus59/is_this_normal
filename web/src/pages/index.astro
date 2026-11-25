@@ -63,6 +63,14 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     band.textContent = a.band ? `${bandLabel(a.band)} · ${a.percentile}`
       : a.analysis === "insufficient" ? "too little material to rate" : "not yet analyzed";
     li.append(meta, title, band);
+    const improper = a.citation_use?.improper;
+    if (improper) {
+      const flag = document.createElement("a");
+      flag.className = "cite-flag";
+      flag.href = `${title.href}#d-use`;
+      flag.textContent = `⚠ ${improper} improper citation${improper === 1 ? "" : "s"}`;
+      li.append(" ", flag);
+    }
     const src = a.sources?.[0];
     if (src?.url) {
       const link = document.createElement("a");
@@ -128,5 +136,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .list :global(.band-routine), .list :global(.band-ordinary) { color: var(--ok); }
   .list :global(.band-novel) { color: var(--warn); }
   .list :global(.band-unprecedented) { color: var(--bad); }
+  .list :global(.cite-flag) { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--bad); color: var(--bad); text-decoration: none; }
+  .list :global(.cite-flag:hover) { text-decoration: underline; }
   .more { display: block; margin: 16px auto; font: inherit; padding: 8px 16px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); color: var(--accent); cursor: pointer; }
 </style>
