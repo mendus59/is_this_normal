@@ -77,7 +77,7 @@ until the status shows **Active**.
 ```json
 [
   {
-    "AllowedOrigins": ["https://mendus59.github.io", "http://localhost:4321"],
+    "AllowedOrigins": ["https://hownormalisthis.com", "https://mendus59.github.io", "http://localhost:4321"],
     "AllowedMethods": ["GET", "HEAD"],
     "AllowedHeaders": ["*"],
     "MaxAgeSeconds": 3600
@@ -86,6 +86,11 @@ until the status shows **Active**.
 ```
 This allows the GitHub Pages site (and local testing) to read the data. If you later put
 the site itself on your domain, add that address to `AllowedOrigins`.
+Use the `https://` address, and turn on **Enforce HTTPS** in the repository's
+**Settings → Pages**. Without it, visitors who arrive over `http://` (including every
+`mendus59.github.io/is_this_normal` link, which GitHub redirects to `http://` when
+HTTPS isn't enforced) get a CORS error and an empty site. The site's layout also
+redirects `http://` to `https://` as a backstop.
 
 **C3. Your public data URL** is `https://data.yourdomain.com`.
 Without a custom domain: **Settings → Public Development URL (r2.dev) → Allow** gives a

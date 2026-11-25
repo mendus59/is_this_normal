@@ -9,6 +9,13 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
+    <!-- The data bucket only allows the HTTPS origin, so a page opened over plain HTTP
+         (old links, or github.io before "Enforce HTTPS" is on) can't load anything. -->
+    <script is:inline>
+      if (location.protocol === "http:" && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) {
+        location.replace("https:" + location.href.slice(5));
+      }
+    </script>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@600;700&family=Public+Sans:wght@400;600;700&family=IBM+Plex+Mono&display=swap" />
   </head>
   <body>
