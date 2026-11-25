@@ -8,6 +8,7 @@ other stage; the newest non-trial row per item is the published summary.
 """
 
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from itn import db
@@ -70,11 +71,41 @@ def material(item, text: str) -> str:
     return "\n\n".join(parts) or "(no summary or text available)"
 
 
-def user_prompt(item, text: str) -> str:
+HELD_CHARS = 7_000
+OPENING_CHARS = 2_500
+ENDING_CHARS = 3_000
+_HELD = re.compile(r"\bHeld\s*:")
+
+
+def ruling_material(item, parts: list[str]) -> str:
+    """A ruling's facts, outcome and conclusion: the start of the syllabus (the facts and
+    question), its "Held:" part (the holding), and the end of the last controlling opinion
+    (the disposition). The start of a long ruling alone is mostly background."""
+    official = (item.summary or "").strip()
+    parts = [t.strip() for t in parts if t and t.strip()]
+    joined = "\n\n".join(parts)
+    source = official if _HELD.search(official) else joined
+    m = _HELD.search(source)
+    if not m and not official:
+        return material(item, joined)
+    opening = (official or joined)[:OPENING_CHARS]
+    out = [f"Syllabus or summary (start):\n{opening}"]
+    if m and m.start() >= OPENING_CHARS - 200:
+        out.append(f"Holding (from the syllabus):\n{source[m.start():m.start() + HELD_CHARS]}")
+    elif m:
+        out[0] = f"Syllabus or summary:\n{source[:m.start() + HELD_CHARS]}"
+    if parts and len(parts[-1]) > ENDING_CHARS:
+        out.append(f"End of the Court's opinion:\n{parts[-1][-ENDING_CHARS:]}")
+    out.append("Say what the Court decided (the holding and who won), not only the background.")
+    return "\n\n".join(out)
+
+
+def user_prompt(item, text) -> str:
+    """`text` is the item's text, or for a ruling the list of its controlling opinions' texts."""
     sub = f", {item.subtype.replace('_', ' ')}" if item.subtype else ""
     return (f"Item {item.id}: {item.title}\n"
             f"Kind: {KIND.get(item.type, item.type.replace('_', ' '))}{sub}; effective {item.effective_date}.\n\n"
-            f"{material(item, text)}\n\n"
+            f"{ruling_material(item, text) if isinstance(text, list) else material(item, text)}\n\n"
             f"Write the plain-language summary (two or three sentences, at most {MAX_WORDS} words).")
 
 
@@ -114,6 +145,13 @@ def current(conn, ids: list[str] | None = None) -> dict[str, str]:
     return {aid: s for aid, out in rows if (s := clean(out))}
 
 
+def read(r2, item):
+    """What the prompt needs: the text start, or for a ruling each controlling opinion whole."""
+    if item.type == "scotus_case":
+        return [r2.get_text(k) or "" for k in item.text_keys]
+    return data.text_of(r2, item.text_keys, ITEM_CHARS)
+
+
 # ---- the run -----------------------------------------------------------------------
 
 def run(p, ids: list[str], show: int = 50) -> dict[str, str]:
@@ -124,8 +162,7 @@ def run(p, ids: list[str], show: int = 50) -> dict[str, str]:
         with db.connect() as c:
             items += data.load_items(c, ids[k:k + 500])
     with ThreadPoolExecutor(READERS) as pool:
-        texts = dict(zip([i.id for i in items],
-                         pool.map(lambda i: data.text_of(p.r2, i.text_keys, ITEM_CHARS), items)))
+        texts = dict(zip([i.id for i in items], pool.map(lambda i: read(p.r2, i), items)))
     sch = schema()
     got = p.call(STAGE, [(i.id, i.as_of, user_prompt(i, texts[i.id]), sch) for i in items])
     out = {i.id: s for i in items if (s := clean(got.get(i.id, (None, None))[0]))}
