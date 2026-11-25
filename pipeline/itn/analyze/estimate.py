@@ -21,7 +21,8 @@ HAIKU_LONG_FROM = 100_000
 # Thinking is billed as output: allowance on top of the visible output, by effort level.
 THINKING = {"low": 1.2, "medium": 1.5, "high": 2.0}
 EFFORT = {"summary": "low", "authority_digest": "medium", "citation_check": "low",
-          "type_assessment": "medium", "verification": "high", "citation_use": "low"}
+          "type_assessment": "medium", "verification": "high", "citation_use": "low",
+          "overview": "low"}
 ESCALATE_SHARE = 0.4    # comparison: share of Haiku assessments re-run on Sonnet
 TIERS = ["haiku", "sonnet", "opus"]
 

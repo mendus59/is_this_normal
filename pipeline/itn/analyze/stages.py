@@ -241,6 +241,25 @@ class Pipeline:
             self._save_run(c, status)
         self.log(f"Run {self.run_id} {status}: ${self.spend.spent:.2f} of ${self.spend.budget:.2f}")
 
+    def write_overviews(self, ids: list[str]) -> None:
+        """Plain-language summaries of `ids` (see itn.analyze.overview)."""
+        from itn.analyze import overview
+        self._run_task(lambda: overview.run(self, ids))
+
+    def _run_task(self, fn) -> None:
+        status = "done"
+        try:
+            fn()
+        except BudgetExceeded as e:
+            self.log(str(e))
+            status = "stopped_budget"
+        except BatchesPending as e:
+            self.log(str(e))
+            status = "waiting_on_batches"
+        with db.connect() as c:
+            self._save_run(c, status)
+        self.log(f"Run {self.run_id} {status}: ${self.spend.spent:.2f} of ${self.spend.budget:.2f}")
+
     def _score(self, ids: list[str]) -> None:
         with db.connect() as c:
             items = data.load_items(c, ids)

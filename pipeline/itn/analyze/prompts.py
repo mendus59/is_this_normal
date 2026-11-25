@@ -21,6 +21,9 @@ def system_prompt(rubric: dict, stage: str) -> str:
     if stage == "citation_use":
         from itn.analyze.citation_use import SYSTEM
         return SYSTEM
+    if stage == "overview":
+        from itn.analyze.overview import SYSTEM as OVERVIEW
+        return OVERVIEW
     scale = "\n".join(f"{k} = {v['band']}: {v['meaning']}" for k, v in rubric["scale"].items())
     return f"""You analyze U.S. Supreme Court rulings, presidential actions, and federal laws for
 IsThisNormal, a nonpartisan project that measures how far each one departed from how such
