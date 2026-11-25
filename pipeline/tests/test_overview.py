@@ -63,3 +63,29 @@ def test_every_stage_is_an_allowed_analysis_kind():
         sql = (migrations_dir() / "001_init.sql").read_text()
         last = set(re.findall(r"'(\w+)'", sql.split("kind           text NOT NULL CHECK (kind IN (", 1)[1].split(")", 1)[0]))
     assert set(llm.MAX_TOKENS) <= last, set(llm.MAX_TOKENS) - last
+
+
+def test_ruling_material_has_facts_holding_and_ending():
+    syl = ("Syllabus. Petitioner challenged a federal ban on corporate spending. " * 60
+           + "Held: The ban violates the First Amendment; Austin is overruled. " + "z" * 9_000)
+    opinion = "Opinion of the Court. " + "w" * 50_000 + " The judgment is reversed. It is so ordered."
+    item = _item(syl[:4000])
+    m = ov.ruling_material(item, [syl, opinion])  # official summary cut before "Held:" -> from the text
+    assert "Syllabus or summary (start):\nSyllabus. Petitioner" in m
+    assert "Holding (from the syllabus):\nHeld: The ban violates" in m
+    assert m.count("It is so ordered.") == 1 and "End of the Court's opinion" in m
+    assert "Say what the Court decided" in m
+    assert len(m) < 14_500
+    u = ov.user_prompt(item, [syl, opinion])
+    assert "Held: The ban violates" in u
+
+
+def test_ruling_without_a_held_part_or_summary_falls_back_to_the_start():
+    m = ov.ruling_material(_item(), ["Opinion text " * 10])
+    assert m.startswith("Text (start):\nOpinion text")
+
+
+def test_short_syllabus_with_held_is_sent_whole():
+    m = ov.ruling_material(_item("Facts. Held: Affirmed."), ["Opinion short."])
+    assert m.startswith("Syllabus or summary:\nFacts. Held: Affirmed.")
+    assert "End of the Court's opinion" not in m
