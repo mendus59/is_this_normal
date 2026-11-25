@@ -80,9 +80,14 @@ def test_ruling_material_has_facts_holding_and_ending():
     assert "Held: The ban violates" in u
 
 
-def test_ruling_without_a_held_part_or_summary_falls_back_to_the_start():
+def test_ruling_without_a_syllabus_reads_the_opinion_start_and_end():
     m = ov.ruling_material(_item(), ["Opinion text " * 10])
-    assert m.startswith("Text (start):\nOpinion text")
+    assert m.startswith("Court's opinion (start):\nOpinion text") and "End of" not in m
+    long = "Question presented. " + "q" * 30_000 + " We therefore hold the mandate is a valid tax."
+    m = ov.ruling_material(_item(), [long])
+    assert "End of the Court's opinion" in m and m.rstrip().endswith("not only the background.")
+    assert "valid tax." in m and len(m) < 13_000
+    assert ov.ruling_material(_item(), []).startswith("(no summary")
 
 
 def test_short_syllabus_with_held_is_sent_whole():

@@ -74,6 +74,8 @@ def material(item, text: str) -> str:
 HELD_CHARS = 7_000
 OPENING_CHARS = 2_500
 ENDING_CHARS = 3_000
+NO_SYLLABUS_START, NO_SYLLABUS_END = 7_000, 5_000
+DECIDED = "Say what the Court decided (the holding and who won), not only the background."
 _HELD = re.compile(r"\bHeld\s*:")
 
 
@@ -87,7 +89,14 @@ def ruling_material(item, parts: list[str]) -> str:
     source = official if _HELD.search(official) else joined
     m = _HELD.search(source)
     if not m and not official:
-        return material(item, joined)
+        # No syllabus: the start of the Court's opinion (the question) and its end (the answer).
+        if not parts:
+            return material(item, joined)
+        out = [f"Court's opinion (start):\n{joined[:NO_SYLLABUS_START]}"]
+        if len(parts[-1]) > NO_SYLLABUS_START + ENDING_CHARS:
+            out.append(f"End of the Court's opinion:\n{parts[-1][-NO_SYLLABUS_END:]}")
+        out.append(DECIDED)
+        return "\n\n".join(out)
     opening = (official or joined)[:OPENING_CHARS]
     out = [f"Syllabus or summary (start):\n{opening}"]
     if m and m.start() >= OPENING_CHARS - 200:
@@ -96,7 +105,7 @@ def ruling_material(item, parts: list[str]) -> str:
         out[0] = f"Syllabus or summary:\n{source[:m.start() + HELD_CHARS]}"
     if parts and len(parts[-1]) > ENDING_CHARS:
         out.append(f"End of the Court's opinion:\n{parts[-1][-ENDING_CHARS:]}")
-    out.append("Say what the Court decided (the holding and who won), not only the background.")
+    out.append(DECIDED)
     return "\n\n".join(out)
 
 
