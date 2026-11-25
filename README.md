@@ -11,6 +11,7 @@ Is a Supreme Court ruling, executive action or contentious law "normal"?
 - Free daily ingestion of public records (Federal Register, Congress, Supreme Court opinions) into a citation graph.
 - New entries are scored automatically each day against versioned rubrics, within a small daily budget.
 - Marks each checked citation as appropriate, a stretch, or improper, with the reason, and flags and filters items that cite improperly.
+- Shows each item's full text as clean paragraphs, with laws and orders laid out by section and subsection.
 <!-- site-summary:end -->
 
 Is a Supreme Court ruling, executive action, or contentious law "normal"? This

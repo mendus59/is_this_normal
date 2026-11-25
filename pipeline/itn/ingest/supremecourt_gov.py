@@ -21,7 +21,7 @@ from urllib.parse import urljoin
 
 from pypdf import PdfReader
 
-from itn import db, http, ids
+from itn import db, http, ids, ligatures
 from itn.extract import citations
 from itn.http import get
 
@@ -329,6 +329,7 @@ def run(conn, r2=None, since_term: int | None = None, fetch_text: bool = True,
                     continue
                 db.upsert_artifact(conn, artifact)
                 for i, (label, text) in enumerate(parts):
+                    text = ligatures.fix(text)  # these PDFs drop the fi/fl ligatures
                     kind = kind_of(label)
                     comp = {"id": ids.component(aid, i, kind), "artifact_id": aid, "kind": kind,
                             "author": author_of(label), "joined_by": [], "ord": i, "text_key": None}

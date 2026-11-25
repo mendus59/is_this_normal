@@ -13,10 +13,13 @@ def cmd_migrate(args) -> None:
     print("Applied:", ", ".join(applied) if applied else "nothing (up to date)")
 
 
+ON_DEMAND = {"tidy-texts"}
+
+
 def cmd_ingest(args) -> None:
     from itn.ingest import (
         cap_scotus, cited_scotus, cited_usc, congress_laws, courtlistener_scotus, federal_register, scotus_bound,
-        scotus_repair, supremecourt_gov,
+        scotus_repair, supremecourt_gov, tidy_texts,
     )
     from itn.extract import text_citations
     from itn.storage import R2
@@ -41,12 +44,14 @@ def cmd_ingest(args) -> None:
         "cited-usc": lambda conn: cited_usc.run(
             conn, r2=r2, fetch_text=not args.no_text, max_minutes=args.scotus_minutes),
         "scotus-repair": lambda conn: scotus_repair.run(conn, r2=r2),
+        "tidy-texts": lambda conn: tidy_texts.run(conn, r2=r2, max_minutes=args.max_minutes),
         "scotus": lambda conn: courtlistener_scotus.run(
             conn, r2=r2, since=args.since_date, fetch_text=not args.no_text,
             max_minutes=args.scotus_minutes),
     }
     with db.connect() as conn:
-        for name in args.sources or list(runners):
+        # One-off jobs run only when named.
+        for name in args.sources or [n for n in runners if n not in ON_DEMAND]:
             n = runners[name](conn)
             print(f"{name}: {n} documents")
 
@@ -537,7 +542,7 @@ def main(argv=None) -> None:
     sub.add_parser("migrate", help="apply database migrations").set_defaults(fn=cmd_migrate)
 
     ing = sub.add_parser("ingest", help="pull public records (free)")
-    ing.add_argument("sources", nargs="*", choices=["federal-register", "congress-laws", "scotus-bulk", "scotus-gov", "scotus-bound", "scotus", "cited-scotus", "text-citations", "cited-usc", "scotus-repair"])
+    ing.add_argument("sources", nargs="*", choices=["federal-register", "congress-laws", "scotus-bulk", "scotus-gov", "scotus-bound", "scotus", "cited-scotus", "text-citations", "cited-usc", "scotus-repair", "tidy-texts"])
     ing.add_argument("--since", type=int, help="Federal Register: first year to (re)ingest")
     ing.add_argument("--since-congress", type=int, help="Congress.gov: first Congress to (re)ingest")
     ing.add_argument("--since-term", type=int, help="supremecourt.gov: first October Term to (re)ingest")
