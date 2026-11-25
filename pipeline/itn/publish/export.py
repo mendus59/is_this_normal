@@ -61,6 +61,14 @@ def build_catalog(conn) -> list[dict]:
         "SELECT DISTINCT subject_id FROM analysis WHERE kind IN ('type_assessment', 'verification')"
         " AND subject_id = ANY(%s)", (sorted(unrated),)).fetchall()} if unrated else set()
     pct = percentiles_by_type(raw, {r[0]: r[1] for r in rows})
+    # How each item's citations were judged (appropriate, stretch, improper, insufficient),
+    # so the list can flag improper ones and filter by them.
+    uses: dict[str, dict[str, int]] = {}
+    for (aid, verdict, n) in conn.execute(
+            "SELECT f.artifact_id, u.verdict, count(*) FROM citation_use u"
+            " JOIN citation c ON c.id = u.citation_id JOIN component f ON f.id = c.from_component"
+            " WHERE u.verdict IS NOT NULL GROUP BY 1, 2").fetchall():
+        uses.setdefault(aid, {})[verdict] = n
     catalog = []
     for (aid, typ, subtype, title, date, in_scope, contentious, summary, sources, _raw, conf) in rows:
         entry = {
@@ -72,6 +80,8 @@ def build_catalog(conn) -> list[dict]:
             entry.update(percentile=pct[aid], band=band(pct[aid]), confidence=conf)
         elif aid in insufficient:
             entry["analysis"] = "insufficient"
+        if aid in uses:
+            entry["citation_use"] = uses[aid]
         catalog.append(entry)
     return catalog
 

@@ -12,6 +12,22 @@ export const TYPE_LABEL = Object.fromEntries(TYPES.map((t) => [t.id, t.short]));
 export const BANDS = ["routine", "ordinary", "unusual", "novel", "unprecedented"];
 export const NOT_ANALYZED = "none";
 
+// Each item's citations, summed up by the worst verdict among them. "none" means no
+// citation of it was checked (laws, or items that cite nothing checkable).
+export const CITE_USES = [
+  { id: "improper", label: "Has improper" },
+  { id: "stretch", label: "Has a stretch" },
+  { id: "appropriate", label: "All appropriate" },
+  { id: "insufficient", label: "Not enough to judge" },
+  { id: "none", label: "No citations checked" },
+];
+
+export function citeKey(use) {
+  if (!use) return "none";
+  for (const k of ["improper", "stretch", "appropriate", "insufficient"]) if (use[k]) return k;
+  return "none";
+}
+
 // Administrations by inauguration date. Applied to every artifact by its date,
 // so for court cases it marks the period, not who decided it.
 export const ADMINS = [
@@ -53,6 +69,7 @@ export function prepare(raw) {
     year: a.date ? Number(a.date.slice(0, 4)) : null,
     admin: adminFor(a.date),
     bandKey: a.band ?? NOT_ANALYZED,
+    citeKey: citeKey(a.citation_use),
     _title: (a.title ?? "").toLowerCase(),
     _text: [a.title, a.summary, a.id, humanize(a.subtype)].filter(Boolean).join(" \n ").toLowerCase(),
   }));
@@ -104,7 +121,7 @@ export function relevance(a, parsed) {
   return score;
 }
 
-export const DEFAULT_FILTERS = { q: "", type: "", sub: "", from: "", to: "", admin: "", band: "", sort: "" };
+export const DEFAULT_FILTERS = { q: "", type: "", sub: "", from: "", to: "", admin: "", band: "", cites: "", sort: "" };
 
 export function readFilters(search = location.search) {
   const p = new URLSearchParams(search);
@@ -123,7 +140,9 @@ export function writeFilters(f, extra = {}) {
 export function applyFilters(catalog, f, parsed = parseQuery(f.q)) {
   const from = f.from ? Number(f.from) : -Infinity;
   const to = f.to ? Number(f.to) : Infinity;
+  const cites = f.cites ? new Set(f.cites.split(",")) : null;
   return catalog.filter((a) =>
+    (!cites || cites.has(a.citeKey)) &&
     (!f.type || a.type === f.type) &&
     (!f.sub || a.subtype === f.sub) &&
     (!f.admin || a.admin === f.admin) &&

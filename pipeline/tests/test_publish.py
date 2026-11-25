@@ -104,6 +104,8 @@ def test_catalog_marks_items_the_model_could_not_rate():
         def execute(self, sql, params=()):
             if sql.lstrip().startswith("SELECT a.id"):
                 return NS(fetchall=lambda: [row("fr/a", 0.7), row("fr/b", 0.3), row("fr/thin", None), row("fr/new", None)])
+            if "FROM citation_use" in sql:
+                return NS(fetchall=lambda: [("fr/a", "appropriate", 4), ("fr/a", "improper", 1)])
             assert "FROM analysis" in sql and params[0] == ["fr/new", "fr/thin"]
             return NS(fetchall=lambda: [("fr/thin",)])
 
@@ -111,3 +113,4 @@ def test_catalog_marks_items_the_model_could_not_rate():
     assert "band" in cat["fr/a"] and "analysis" not in cat["fr/a"]
     assert cat["fr/thin"].get("analysis") == "insufficient" and "band" not in cat["fr/thin"]
     assert "analysis" not in cat["fr/new"]
+    assert cat["fr/a"]["citation_use"] == {"appropriate": 4, "improper": 1} and "citation_use" not in cat["fr/b"]
