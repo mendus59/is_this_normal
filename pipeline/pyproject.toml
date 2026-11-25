@@ -26,5 +26,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["itn*"]
 
+[tool.setuptools.package-data]
+itn = ["data/*.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

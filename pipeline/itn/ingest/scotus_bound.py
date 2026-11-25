@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 
 from pypdf import PdfReader
 
-from itn import db, http, ids
+from itn import db, http, ids, ligatures
 from itn.extract import citations
 from itn.http import get
 from itn.ingest import scotus_repair
@@ -249,6 +249,7 @@ def load(conn, r2, fetch_text: bool, row: dict, syllabus, parts):
     # A reload replaces every opinion; drop ones an earlier split left behind.
     conn.execute("DELETE FROM component WHERE artifact_id = %s", (aid,))
     for i, (label, text) in enumerate(parts):
+        text = ligatures.fix(text)  # these PDFs drop the fi/fl ligatures
         kind = sc.kind_of(label)
         comp = {"id": ids.component(aid, i, kind), "artifact_id": aid, "kind": kind,
                 "author": sc.author_of(label), "joined_by": [], "ord": i, "text_key": None}

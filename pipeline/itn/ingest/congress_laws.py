@@ -8,6 +8,7 @@ where it left off, and laws already loaded are skipped.
 """
 
 import datetime as dt
+import html
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -175,8 +176,19 @@ class CongressAPI:
             offset += len(items)
 
 
-def _strip_html(html: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
+def _strip_html(page: str) -> str:
+    """A CRS summary as one line of plain text (entities decoded, &nbsp; as a space)."""
+    text = html.unescape(re.sub(r"<[^>]+>", " ", page or ""))
+    return re.sub(r"[\s\u00a0]+", " ", text).strip()
+
+
+def law_text(page: str) -> str:
+    """GovInfo's fixed-width text of a law, as plain text that keeps its lines and
+    indentation (the reader rebuilds sections and lettered items from them)."""
+    m = re.search(r"<pre[^>]*>(.*?)(?:</pre>|$)", page, re.S | re.I)
+    body = re.sub(r"<[^>]+>", "", m.group(1) if m else page)
+    body = html.unescape(body).replace("\r", "").replace("\u00a0", " ")
+    return "\n".join(line.rstrip() for line in body.split("\n")).strip("\n") + "\n"
 
 
 def law_details(api: CongressAPI, client, bill: dict) -> tuple[str | None, str | None, list[dict]]:
@@ -256,7 +268,7 @@ def run(conn, r2=None, since_congress: int | None = None, fetch_text: bool = Tru
                     if resp.is_success:
                         key_ = ids.text_key(artifact["id"])
                         artifact["text_key"] = key_
-                        artifact["text_sha256"] = r2.put_text(key_, _strip_html(resp.text))
+                        artifact["text_sha256"] = r2.put_text(key_, law_text(resp.text))
                     else:
                         artifact["metadata"]["text_missing"] = True
                 db.upsert_artifact(conn, artifact)

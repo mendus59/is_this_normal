@@ -1,0 +1,154 @@
+Page Proof Pending Publication
+Shay Dvoretzky argued the cause for respondent. With
+him on the brief were Parker Rider-Longmaid, Hanaa
+Khan, Raza Rasheed, and Mike Pan Gao .*
+Justice Thomas delivered the opinion of the Court.
+Respondent Muk Choi Lau, a Chinese citizen, became a
+lawful permanent resident in 2007. New Jersey charged
+him with a crime in 2012. He then temporarily left the
+United States. Ordinarily, a lawful permanent resident who
+arrives in the United States after a temporary absence does
+not have to apply for admission because he is regarded as
+already admitted. 8 U. S. C. § 1101(a)(13)(C). If he has
+committed certain crimes, however, the Government may re-
+gard him as not yet admitted. § 1101(a)(13)(C)(v). Because
+of Lau's pending charge for a crime, a border offcer declined
+to regard Lau as admitted upon his return and did not admit
+him at the border. Instead, the offcer paroled him pending
+the resolution of his criminal case, meaning that he was al-
+lowed to physically enter the country without being formally
+admitted. After Lau pleaded guilty to the New Jersey
+charge, the Government initiated removal proceedings and
+secured a removal order based on his conviction. The Board
+of Immigration Appeals affrmed.
+The United States Court of Appeals for the Second Circuit
+vacated the removal order. It concluded that Lau should
+have been regarded as already admitted upon arrival unless
+the border offcer had “clear and convincing” evidence that
+Lau had committed the crime, which it held that the offcer
+lacked. Muk Choi Lau v. Bondi, 130 F. 4th 42, 46 (2025).
+Because the Immigration and Nationality Act (INA) does not
+*Christopher J. Hajec fled a brief for the Federation for American Im-
+migration Reform as amicus curiae urging reversal.
+Briefs of amici curiae urging affrmance were fled for the American
+Immigration Lawyers Association et al. by Lauren M. Blas; for the Asian
+American Legal Defense and Education Fund et al. by Alan E. Schoen-
+feld; and for Immigration Law Professors by Carolyn F. Corwin.
+impose that requirement, we vacate the Second Circuit's
+judgment.
+I
+A
+The Government can remove aliens on different grounds
+depending on whether they have been formally admitted to
+the country. It can remove aliens applying for admission if
+they are “ `inadmissible,' ” and it can remove already ad-
+mitted aliens if they are “ `deportable.' ” Campos-Chaves v.
+Garland, 602 U. S. 447, 451 (2024). The INA specifes the
+respective grounds of inadmissibility and deportability with
+which the Government can charge an alien. §§ 1182(a),
+1227(a). As relevant here, the Government can charge an
+alien applicant for admission as inadmissible if he has been
+“convicted of . . . a crime involving moral turpitude” at any
+time. § 1182(a)(2)(A)(i)(I). By contrast, the Government
+can charge an already admitted alien as deportable if he has
+been “convicted of a crime involving moral turpitude” only
+if that crime was “committed within fve years . . . after the
+date of admission.” § 1227(a)(2)(A)(i).
+Because lawful permanent residents generally must be re-
+garded as already admitted to the country, they usually do
+not have to reapply for admission when they return from
+temporary overseas travel. § 1101(a)(13)(C). But, under an
+exception central to this case, the Government may regard
+a lawful permanent resident as “seeking an admission” (and
+thus as not already admitted) if he “has committed an offense
+identifed in section 1182(a)(2),” § 1101(a)(13)(C)(v), including
+a crime involving moral turpitude, § 1182(a)(2)(A)(i)(I).
+When the Government institutes removal proceedings
+against an alien, the INA imposes various burdens of proof
+on the alien and the Government. See §§ 1229a(c)(2), (3).
+But, it does not specify whether the Government has the bur-
+den to establish that the alien is an applicant for admission
+in the frst place, as opposed to someone already admitted.
+Page Proof Pending Publication
+B
+Lau is a Chinese citizen. He was admitted to the United
+States as a lawful permanent resident in 2007, making him
+a “noncitizen who is authorized to live permanently in the
+United States.” Barton v. Barr, 590 U. S. 222, 227 (2020).
+On May 7, 2012, New Jersey charged Lau with trademark
+counterfeiting. While awaiting trial, Lau temporarily left
+the United States for China. On June 15, 2012, Lau at-
+tempted to reenter the United States by presenting himself
+to a border offcer at John F. Kennedy International Airport.
+Because of his pending criminal charge, the offcer did not
+regard Lau as already admitted, but instead as an applicant
+seeking admission.
+The border offcer did not immediately decide whether Lau
+was ultimately admissible. The INA allows the Govern-
+ment to parole certain aliens seeking admission instead of
+formally admitting them, detaining them, or removing them.
+§ 1182(d)(5)(A). Parole allows an alien to physically enter
+the United States without being admitted. Ibid.; see also
+§ 1101(a)(13)(B). Parole thus allows the Government to
+pause the inspection at the border and defer it to a later time
+without having to detain the alien pending a fnal admissibil-
+ity decision, as would otherwise be required. §§ 1225(a),
+(b)(2)(A); Jennings v. Rodriguez, 583 U. S. 281, 300 (2018).
+The Government exercised that authority to parole Lau
+pending the resolution of his criminal case, instead of for-
+mally deeming him admitted.
+C
+After Lau pleaded guilty to his trademark-counterfeiting
+charge on June 24, 2013, the Government initiated removal
+proceedings against him on March 13, 2014. At those pro-
+ceedings, the Government charged Lau as an applicant for
+admission who was inadmissible for having been convicted of
+a crime involving moral turpitude. See § 1182(a)(2)(A)(i)(I).
+Lau sought to terminate the proceedings on the ground that
+Page Proof Pending Publication
+the Government improperly classifed him as an applicant
+“seeking admission” when he returned from his trip abroad,
+instead of deeming him already admitted as a lawful perma-
+nent resident and subject to removal only on deportability
+grounds. 130 F. 4th, at 44 (internal quotation marks omit-
+ted). Lau also argued that his conviction was not of a crime
+involving moral turpitude, but that issue is not before the
+Court because the Second Circuit did not reach it. Id., at 44,
+46. Thus, for purposes of this opinion, we assume without
+deciding that Lau's conviction was of a crime involving
+moral turpitude.
+The Immigration Judge found Lau removable as charged,
+and the Board of Immigration Appeals affrmed the removal
+order. It held that the Government had proved by clear and
+convincing evidence that Lau fell within the exception for
+lawful permanent residents who had committed a crime in-
+volving moral turpitude and that he was inadmissible and
+removable based on his conviction.
+D
+Lau sought review in the Second Circuit, which vacated
+the removal order. The court acknowledged that a lawful
+permanent resident may be regarded as seeking admission
+after he has committed a crime involving moral turpitude,
+even if he has not yet been convicted. But, according to the
+Second Circuit, it is not enough that the lawful permanent
+resident committed a crime involving moral turpitude; the
+Government needed “clear and convincing evidence,” at the
+border, that he committed the crime. Id., at 47. Without
+that evidence, the court said, border offcers must regard
+lawful permanent residents as already admitted, which pre-
+cludes removal on inadmissibility grounds. Because, in its
+view, the criminal charge alone did not give the border off-
+cer clear and convincing evidence that Lau committed the
+crime, the court concluded that Lau was not properly pa-
+roled, that he should instead have been deemed admitted,
+Page Proof Pending Publication
+and that he therefore could not be charged with inadmissibil-
+ity. The court remanded to the agency with instructions
+to terminate removal proceedings based on inadmissibility
+without prejudice to the Government's ability to charge Lau
+with deportability.
+Because the Second Circuit's decision conficted with those
+of the Fifth and Ninth Circuits, see Luz Munoz v. Holder,
+755 F. 3d 366, 370 (CA5 2014); Vazquez Romero v. Garland,
+999 F. 3d 656, 664 (CA9 2021), we granted certiorari, 607
+U. S. 1120 (2026).

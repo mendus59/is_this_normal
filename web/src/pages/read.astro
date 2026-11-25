@@ -1,7 +1,5 @@
 ---
 import Base from "../layouts/Base.astro";
-const dataBase = import.meta.env.PUBLIC_DATA_BASE_URL ?? "";
-const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 ---
 <Base title="Reader · IsThisNormal">
   <p id="status" class="status">Loading…</p>
@@ -16,7 +14,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       <p class="legend">Each checked citation is marked in the text: <span class="cu-badge v-appropriate">Appropriate</span> the cited authority supports it; <span class="cu-badge v-stretch">Stretch</span> not technically wrong, but beyond what the authority held; <span class="cu-badge v-improper">Improper</span> the authority does not say this (two independent checks agreed). Select a mark for the reason. <a id="m-link" href="#">How citations are checked</a></p>
     </section>
     <section id="d-brief" class="brief" hidden><h2>In brief</h2><p></p><p class="brief-note">A plain-language summary written by an AI model from this item's official summary and text. Read the text for the details.</p></section>
-    <section id="d-summary" hidden><h2>Official summary</h2><p class="summary"></p></section>
+    <section id="d-summary" hidden><h2>Official summary</h2><div class="summary"></div></section>
     <section id="d-opinions" hidden>
       <h2>Opinions</h2>
       <div id="tabs" class="tabs" role="tablist"></div>
@@ -34,7 +32,10 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   </article>
 </Base>
 
-<script define:vars={{ dataBase, base }}>
+<script>
+  import { formatText, decodeEntities } from "../lib/textfmt.js";
+  const dataBase = import.meta.env.PUBLIC_DATA_BASE_URL ?? "";
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   const $ = (id) => document.getElementById(id);
   const KIND = { majority: "Opinion of the Court", unanimous: "Opinion of the Court", plurality: "Plurality",
     concurrence: "Concurrence", dissent: "Dissent", concurrence_in_part: "Concurring in part, dissenting in part",
@@ -49,11 +50,16 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
     return textCache.get(key);
   }
 
+  // Each source's layout (GPO pages, PDF line wrapping, one paragraph per line) is turned
+  // into paragraphs, headings and indented lettered items by textfmt.js.
   function paragraphs(el, body, cites = []) {
-    const texts = body.split(/\n{2,}|\n(?=\s{2,})/).filter((p) => p.trim()).map((p) => p.replace(/\s*\n\s*/g, " ").trim());
+    const blocks = formatText(body);
+    const texts = blocks.map((b) => b.text);
     const marks = placeMarks(texts, cites);
     el.replaceChildren(...texts.map((t, i) => {
       const para = document.createElement("p");
+      if (blocks[i].head) para.className = "h";
+      if (blocks[i].level) para.dataset.level = String(Math.min(blocks[i].level, 6));
       let at = 0;
       for (const m of marks[i]) {
         para.append(t.slice(at, m.start));
@@ -191,7 +197,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
       return i ? [" · ", a] : [a];
     }));
     if (doc.brief) { $("d-brief").hidden = false; $("d-brief").querySelector("p").textContent = doc.brief; }
-    if (doc.summary) { $("d-summary").hidden = false; paragraphs($("d-summary").querySelector(".summary"), doc.summary); }
+    if (doc.summary) { $("d-summary").hidden = false; paragraphs($("d-summary").querySelector(".summary"), decodeEntities(doc.summary)); }
     if (doc.opinions.length) {
       $("d-opinions").hidden = false;
       $("tabs").replaceChildren(...doc.opinions.map((op, i) => {
@@ -233,7 +239,20 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
   .tabs :global(button) { font: inherit; font-size: 14px; padding: 6px 12px; border: 1px solid var(--rule); border-radius: 999px; background: var(--sheet); color: var(--ink); cursor: pointer; }
   .tabs :global(button[aria-selected="true"]) { background: var(--accent); border-color: var(--accent); color: var(--sheet); }
   .opinion { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 20px; max-height: 75vh; overflow-y: auto; }
-  .opinion :global(p) { margin: 0 0 12px; max-width: 72ch; }
+  .opinion :global(p) { margin: 0 0 12px; max-width: 72ch; line-height: 1.55; }
+  .opinion :global(p.h) { font-weight: 600; margin-top: 18px; }
+  .opinion :global(p[data-level="1"]) { padding-left: 1.25em; }
+  .opinion :global(p[data-level="2"]) { padding-left: 2.5em; }
+  .opinion :global(p[data-level="3"]) { padding-left: 3.75em; }
+  .opinion :global(p[data-level="4"]) { padding-left: 5em; }
+  .opinion :global(p[data-level="5"]), .opinion :global(p[data-level="6"]) { padding-left: 6.25em; }
+  @media (max-width: 600px) {
+    .opinion :global(p[data-level]) { padding-left: calc(var(--lv, 0) * 1em); }
+    .opinion :global(p[data-level="1"]) { --lv: .75; }
+    .opinion :global(p[data-level="2"]) { --lv: 1.5; }
+    .opinion :global(p[data-level="3"]) { --lv: 2.25; }
+    .opinion :global(p[data-level="4"]), .opinion :global(p[data-level="5"]), .opinion :global(p[data-level="6"]) { --lv: 3; }
+  }
   .cites { padding-left: 20px; font-size: 14px; }
   .cites :global(li) { margin-bottom: 4px; overflow-wrap: anywhere; }
   .count { color: var(--ink-soft); font-size: .7em; }
