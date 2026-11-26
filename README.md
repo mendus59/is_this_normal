@@ -14,6 +14,9 @@ Is a Supreme Court ruling, executive action or contentious law "normal"?
 - Shows each item's full text as clean paragraphs, with laws and orders laid out by section and subsection.
 <!-- site-summary:end -->
 
+<!-- site-screenshot: docs/screenshot.jpg -->
+![Screenshot of IsThisNormal](docs/screenshot.jpg)
+
 Is a Supreme Court ruling, executive action, or contentious law "normal"? This
 project measures each one since 2000 against the precedent, statute text,
 comparable actions, and public data that existed when it happened.
